@@ -1,1 +1,130 @@
-# finances-app
+# Finances app: setup guide
+
+The setup has three parts and takes about 20 minutes. You only do it once.
+
+- **apps-script/**: the backend. It goes into your Google Sheet.
+- **app/**: the app itself. It goes onto GitHub Pages.
+
+The backend is set to the test sheet **"Finances (app test)"**, so you can try everything without touching your real Budget 2026 file.
+
+---
+
+## Part 1: The backend (Google Apps Script)
+
+1. Open the **Finances (app test)** sheet in Google Drive on your computer.
+2. Click **Extensions → Apps Script**. A new tab opens.
+3. Delete everything in the `Code.gs` file there and paste in the contents of **apps-script/Code.gs**.
+4. Click the ⚙️ **Project Settings** icon on the left. Tick **"Show appsscript.json manifest file in editor"** and set the time zone to **(GMT+01:00) Zurich**.
+5. Go back to the **Editor** (`< >` icon). Open `appsscript.json` and replace its contents with **apps-script/appsscript.json**. Press **Ctrl+S / Cmd+S** to save.
+6. In the function menu at the top, choose **setup** and click **▶ Run**.
+   - Google asks for permission. Click **Review permissions** and choose your account.
+   - You'll see **"Google hasn't verified this app"**. This is normal for your own scripts. Click **Advanced → Go to (project name) (unsafe)**, then **Allow**.
+7. The **Execution log** opens at the bottom and shows `Your app key: ...`. **Copy that key** and keep it private, like a password.
+8. Click **Deploy → New deployment**. Click the ⚙️ next to "Select type" and choose **Web app**.
+   - Description: `Finances`
+   - Execute as: **Me**
+   - Who has access: **Anyone**
+   - Click **Deploy**, then **copy the Web app URL** (it ends in `/exec`).
+
+"Anyone" only means the address can be reached. Without your key, the script refuses every request.
+
+**Later changes to Code.gs:** Deploy → **Manage deployments** → ✏️ edit → Version: **New version** → Deploy. The URL stays the same.
+
+---
+
+## Part 2: Put the app on GitHub Pages
+
+1. Create a free account at **github.com** if you don't have one.
+2. Click **+ → New repository**. Name it `finances`, choose **Public**, tick **Add a README file**, then click **Create repository**.
+3. Click **Add file → Upload files**. Drag in **everything inside the `app` folder**: `index.html`, `app.js`, `styles.css`, `sw.js`, `manifest.webmanifest`, and the `icons` folder. Drag the files themselves, not the `app` folder. Click **Commit changes**.
+4. Go to **Settings → Pages**. Under "Build and deployment", choose Source **Deploy from a branch**, Branch **main**, folder **/ (root)**, then click **Save**.
+5. After 1–2 minutes your app is live at:
+   `https://YOUR-USERNAME.github.io/finances/`
+
+Only the app's code is public. Your money data stays in your Google Sheet, and the key never goes into the code.
+
+**Updating the app later:** upload the changed files the same way. Also change `VERSION` at the top of `sw.js` (for example to `finances-v2`) so phones load the new files.
+
+---
+
+## Part 3: Install on iPhone and computer
+
+**iPhone**
+1. Open the app address in **Safari** (it must be Safari).
+2. Tap the **Share** button → **Add to Home Screen** → **Add**.
+3. Open **Finances** from the home screen. It goes straight to the **More** screen.
+4. Paste the **Web app URL** and the **App key**, then tap **Save and test**. You should see ✓ Connected.
+   - Tip: send yourself the URL and key in Apple Notes from your computer, then copy them on the phone.
+
+**Computer**
+Open the same address in Chrome, Edge or Safari, and enter the URL and key once. In Chrome or Edge you can also click the install icon in the address bar to get a desktop app.
+
+---
+
+## Using it
+
+- **+**: add an expense, income or transfer. Merchants you've used before fill in the category, account, currency and item automatically.
+- **📷 Add receipt**: take a photo, or pick one from Photos or Files (PDF works too). Photos are made smaller before upload. They're saved in the **Finances Receipts** folder in your Google Drive and linked in the Log's **Receipt** column.
+- **No signal?** Entries are kept on the phone and uploaded automatically when you're back online. You can see them in Activity marked ⏳.
+- **Edit or delete**: in **Activity**, tap any expense, income or transfer. Change it and tap **Save changes**, or tap **Delete entry**. Before changing anything, the app checks that the row in the sheet still holds that entry; if you edited it in the sheet in the meantime, the app asks you to refresh. Deleting clears the row's input cells and keeps its formulas, and a receipt file stays in your Drive folder.
+- **Accounts** (More screen): add an account, or tap one to change its name, type or starting balance. A new name is updated everywhere the account is used (Log, Income, Transfers, Planned). An account that has entries can't be deleted or change currency; rename it instead.
+- **Categories and budgets** (More screen): add a category, change a monthly budget, or rename one. A new name is updated in the Log, Planned and Items. A category that has entries can't be deleted.
+- **Bank rate**: type it only when you want the exact rate your bank used. Otherwise the sheet's rate for that date is used, as before.
+
+## The Plan tab
+
+- **Warnings:** every account is checked day by day for the next 24 months. You get a warning when an account would go below its **safety cushion** (set it in More → Accounts; empty means 0, and credit cards get no warning unless you set one). The warning says when it starts, the lowest point, and, when possible, which account could cover it.
+- **Lowest balance each month:** pick "All (CHF)" or one account. Red dots are months below the cushion. Tap or hover to see the date and amount.
+- **Money in and out per month:** planned items plus expected day-to-day spending. Until you have 3 full months of records, the app uses your monthly budgets for day-to-day spending (minus what is already planned in that category), then it switches to your real 3-month average.
+- **Coming up (45 days):** tap **Paid** (or **Received**) to add it to your records with one tap. You can change the amount, date and account first. **Skip** moves the item on without recording anything.
+- **Recurring and planned:** everything in your Planned tab. Tap an item to change it, or **+ Add**. Use **Money in** for salary or money owed to you, and **Transfer** for moving money between your accounts, for example a monthly CHF → EGP transfer or paying off a credit card.
+
+**What the app changes in your sheet the first time it runs:**
+- **Planned tab:** four new columns. **Last paid** (the app moves this forward when you tap Paid or Skip), **Ends on**, **If weekend** (Earlier / Later / No change), and **To account** (for transfers). Rows already marked Paid get their first due date as Last paid.
+- **Salary:** a monthly "money in" row for your salary is added from your latest Salary in the Income tab. It is moved to the Friday before when the 20th is on a weekend.
+- **Accounts tab:** a new **Safety cushion** column (L).
+- In the Planned tab, a minus amount means money in, as you already use it.
+
+## Sinking funds and goals (Plan tab)
+
+The money stays in your accounts. The app only keeps track of how much you have set aside, so you see what is really free to spend (shown under Accounts on Home).
+
+- **Sinking fund:** for a bill that comes once or a few times a year, like the half-fare card, Axa or the apartment instalments. The app lists such bills under "Bills that come less than monthly" with a **Create fund** button. Link the fund to the bill. When you tap **Paid** on that bill, it is paid from the fund and the fund's target moves to the next due date.
+- **Goal:** for something you are saving towards, like an emergency fund.
+- Each one shows how much to set aside each month to reach the target on time. Tap **Set aside** once a month. You can also type your own monthly amount; the app warns you if it isn't enough.
+- Tap a fund or goal to change it, or to **take money out** when you used part of it.
+- These are kept in a new **Envelopes** tab in your sheet (created automatically).
+
+## Check against your bank (More → Accounts)
+
+Tap an account, type the balance your bank shows, and tap **Check**. If the numbers differ, add the missing entries yourself, or tap **Add correction**. A correction is saved as an expense or income with the category **Balance correction**, which the app leaves out of your budget, spending and income totals. The date you last checked is shown under each account.
+
+## Transfer costs (More)
+
+For every transfer between currencies where you filled in **Amount received**, the app compares what arrived with the market rate that day (from your Rates tab). It shows the cost in % and in CHF, the total for this year, and which route is cheapest. The cost also shows on each transfer in Activity. When a day's rate is missing, today's rate is used and the cost is marked "approx.".
+
+## Search, category details and duplicating
+
+- **Search (Activity):** type to search all years by merchant, item, note, account or amount. Tap ⚲ for filters (type, category, account, dates, amounts). Tap a result to edit it.
+- **Category details (Home):** tap a category under "Budget by category" to see the last 12 months against the budget, where the money went, and this month's entries.
+- **Duplicate:** open any entry and tap **Duplicate as new entry**. You get a copy with today's date, ready to change and save.
+
+## Installing an update
+
+When you get a new version:
+1. **Backend:** replace all of `Code.gs` in Apps Script, save, then **Deploy → Manage deployments → ✏️ → Version: New version → Deploy**. The URL and key stay the same.
+2. **App:** on GitHub, open your `finances` repository and click **Add file → Upload files**. Drag in the new files from the `app` folder; files with the same name are replaced. Click **Commit changes**.
+3. On the iPhone, close the app fully (swipe it away) and open it again. If it still looks old, wait a minute and repeat.
+
+## Moving to your real sheet
+
+When you're happy with the test, change `SHEET_ID` at the top of `Code.gs` to your real sheet's ID. The ID is the long part of the sheet's address between `/d/` and `/edit`. Also add a **Receipt** header in column M of the real Log tab, then deploy a new version as above.
+
+## If something goes wrong
+
+| Message | What to do |
+|---|---|
+| Wrong app key | Paste the key again in Settings, with no spaces. |
+| Unexpected reply from the server | The URL is wrong, or it isn't deployed with access "Anyone". |
+| Missing … / Amount must be more than 0 | A required field is empty. |
+| Nothing new shows in the app | Switch to another app and back, or close and reopen it. It refreshes every time it opens. |

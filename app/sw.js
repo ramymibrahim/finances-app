@@ -1,0 +1,26 @@
+// Keeps the app's own files on the phone so it opens without a connection.
+// Change VERSION whenever you upload new app files.
+const VERSION = 'finances-v4';
+const FILES = ['./', 'index.html', 'styles.css', 'app.js', 'manifest.webmanifest',
+  'icons/icon-192.png', 'icons/apple-touch-icon.png', 'icons/pdf.svg'];
+
+self.addEventListener('install', e => {
+  e.waitUntil(caches.open(VERSION).then(c => c.addAll(FILES)).then(() => self.skipWaiting()));
+});
+self.addEventListener('activate', e => {
+  e.waitUntil(caches.keys().then(keys => Promise.all(keys.filter(k => k !== VERSION).map(k => caches.delete(k))))
+    .then(() => self.clients.claim()));
+});
+// App files: try the network first (so updates show), fall back to the saved copy.
+// Requests to Google are not touched.
+self.addEventListener('fetch', e => {
+  const url = new URL(e.request.url);
+  if (e.request.method !== 'GET' || url.origin !== self.location.origin) return;
+  e.respondWith(
+    fetch(e.request).then(res => {
+      const copy = res.clone();
+      caches.open(VERSION).then(c => c.put(e.request, copy));
+      return res;
+    }).catch(() => caches.match(e.request, { ignoreSearch: true }).then(r => r || caches.match('index.html')))
+  );
+});

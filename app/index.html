@@ -1,0 +1,265 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<meta name="apple-mobile-web-app-title" content="Finances">
+<meta name="theme-color" content="#f9f9f7" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#0d0d0d" media="(prefers-color-scheme: dark)">
+<title>Finances</title>
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
+<link rel="icon" href="icons/icon-192.png">
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+<header class="topbar">
+  <h1 id="title">This month</h1>
+  <span id="syncState" class="sync" hidden></span>
+</header>
+
+<main>
+  <!-- HOME -->
+  <section id="view-home" class="view">
+    <div class="monthnav">
+      <button class="icon-btn" id="prevMonth" aria-label="Previous month">‹</button>
+      <span id="monthLabel">…</span>
+      <button class="icon-btn" id="nextMonth" aria-label="Next month">›</button>
+    </div>
+
+    <div class="card hero">
+      <div class="hero-label" id="heroLabel">Left to spend</div>
+      <div class="hero-value" id="heroValue">–</div>
+      <div class="hero-sub" id="heroSub"></div>
+      <div class="meter" aria-hidden="true"><span id="heroMeter"></span></div>
+    </div>
+
+    <div class="stats">
+      <div class="stat"><div class="stat-label">Spent</div><div class="stat-value" id="statSpent">–</div></div>
+      <div class="stat"><div class="stat-label">Income</div><div class="stat-value" id="statIncome">–</div></div>
+      <div class="stat"><div class="stat-label">Salary in</div><div class="stat-value" id="statSalary">–</div></div>
+    </div>
+
+    <div class="card">
+      <div class="card-head"><h2>Spending through the month</h2><span class="muted small">CHF</span></div>
+      <div id="chart" class="chart" role="img" aria-label="Cumulative spending compared with budget pace"></div>
+      <details class="table-view"><summary>Show as table</summary><div id="chartTable"></div></details>
+    </div>
+
+    <div class="card">
+      <div class="card-head"><h2>Budget by category</h2><span class="muted small">CHF</span></div>
+      <div id="categories"></div>
+    </div>
+
+    <div class="card">
+      <div class="card-head"><h2>Accounts</h2><span class="muted small" id="netWorth"></span></div>
+      <div id="accounts"></div>
+      <div id="freeToSpend" class="free" hidden></div>
+    </div>
+  </section>
+
+  <!-- ACTIVITY -->
+  <section id="view-activity" class="view" hidden>
+    <div class="searchbar">
+      <input id="qText" type="search" placeholder="Search all years: merchant, note, amount…" aria-label="Search">
+      <button class="icon-btn" id="qFilterBtn" aria-label="Filters">⚲</button>
+    </div>
+    <div id="qFilters" class="card filters" hidden>
+      <div class="row2">
+        <label>Type<select id="qKind"><option value="">All</option><option value="expense">Expenses</option><option value="income">Income</option><option value="transfer">Transfers</option></select></label>
+        <label>Category<select id="qCat"><option value="">All</option></select></label>
+      </div>
+      <label>Account<select id="qAcc"><option value="">All</option></select></label>
+      <div class="row2">
+        <label>From<input id="qFrom" type="date"></label>
+        <label>To<input id="qTo" type="date"></label>
+      </div>
+      <div class="row2">
+        <label>Min amount<input id="qMin" inputmode="decimal"></label>
+        <label>Max amount<input id="qMax" inputmode="decimal"></label>
+      </div>
+      <div class="row2"><button class="btn-secondary" id="qClear">Clear</button><button class="btn-primary" id="qGo">Search</button></div>
+    </div>
+    <div id="searchResults" hidden></div>
+    <div id="monthActivity">
+    <div class="monthnav">
+      <button class="icon-btn" data-month="-1" aria-label="Previous month">‹</button>
+      <span class="monthLabel2">…</span>
+      <button class="icon-btn" data-month="1" aria-label="Next month">›</button>
+    </div>
+    <div id="activity"></div>
+    </div>
+  </section>
+
+  <!-- ADD -->
+  <section id="view-add" class="view" hidden>
+    <div id="editBar" class="editbar" hidden>
+      <button type="button" class="link-btn" id="cancelEdit">Cancel</button>
+      <span id="editLabel">Editing</span>
+      <span></span>
+    </div>
+    <div class="segmented" role="tablist">
+      <button role="tab" data-type="expense" class="active">Expense</button>
+      <button role="tab" data-type="income">Income</button>
+      <button role="tab" data-type="transfer">Transfer</button>
+    </div>
+
+    <form id="addForm" autocomplete="off" novalidate>
+      <div class="amount-row">
+        <input id="fAmount" class="amount" type="text" inputmode="decimal" placeholder="0.00" aria-label="Amount" required>
+        <div id="fCurrency" class="chips small-chips" role="radiogroup" aria-label="Currency"></div>
+      </div>
+
+      <!-- expense -->
+      <div class="only-expense">
+        <label>Merchant<input id="fMerchant" list="merchantList" placeholder="e.g. Coop"></label>
+        <datalist id="merchantList"></datalist>
+        <label>Item<input id="fItem" list="itemList" placeholder="e.g. Groceries"></label>
+        <datalist id="itemList"></datalist>
+        <div class="field-label">Category</div>
+        <div id="fCategory" class="chips" role="radiogroup" aria-label="Category"></div>
+        <label>Paid from<select id="fAccount"></select></label>
+      </div>
+
+      <!-- income -->
+      <div class="only-income" hidden>
+        <label>Source<input id="fSource" placeholder="e.g. UPU"></label>
+        <label>Type<select id="fIncomeType">
+          <option>Salary</option><option>Bonus</option><option>Refund</option><option>Gift</option><option>Other</option>
+        </select></label>
+        <label>Received into<select id="fIncomeAccount"></select></label>
+      </div>
+
+      <!-- transfer -->
+      <div class="only-transfer" hidden>
+        <label>From<select id="fFrom"></select></label>
+        <label>To<select id="fTo"></select></label>
+        <label id="receivedWrap" hidden>Amount received <span class="muted" id="receivedCur"></span>
+          <input id="fReceived" type="text" inputmode="decimal" placeholder="As shown by the bank"></label>
+      </div>
+
+      <div class="row2">
+        <label>Date<input id="fDate" type="date" required></label>
+        <label class="only-notransfer">Bank rate <span class="muted">(optional)</span><input id="fRate" type="text" inputmode="decimal" placeholder="Auto"></label>
+      </div>
+      <label>Note<input id="fNote" placeholder="Optional"></label>
+
+      <div class="only-expense receipt">
+        <input id="fReceipt" type="file" accept="image/*,application/pdf" hidden>
+        <div id="receiptExisting" class="receipt-preview" hidden>
+          <span>📎 Receipt attached · <a id="receiptLink" href="#" target="_blank" rel="noopener">View</a></span>
+          <button type="button" class="icon-btn" id="receiptRemove" aria-label="Remove receipt">✕</button>
+        </div>
+        <button type="button" class="btn-secondary" id="receiptBtn">📷 Add receipt</button>
+        <div id="receiptPreview" class="receipt-preview" hidden>
+          <img id="receiptImg" alt="Receipt preview">
+          <span id="receiptName"></span>
+          <button type="button" class="icon-btn" id="receiptClear" aria-label="Remove receipt">✕</button>
+        </div>
+      </div>
+
+      <div id="formError" class="form-error" role="alert" hidden></div>
+      <button type="submit" class="btn-primary" id="saveBtn">Save</button>
+      <button type="button" class="btn-secondary" id="duplicateBtn" hidden>Duplicate as new entry</button>
+      <button type="button" class="btn-danger" id="deleteBtn" hidden>Delete entry</button>
+    </form>
+  </section>
+
+  <!-- PLAN -->
+  <section id="view-plan" class="view" hidden>
+    <div id="gapCard" class="card"></div>
+
+    <div class="card">
+      <div class="card-head"><h2>Lowest balance each month</h2><span class="muted small" id="fcUnit">CHF</span></div>
+      <div id="fcAccounts" class="chips small-chips scroll-chips" role="radiogroup" aria-label="Account"></div>
+      <div id="fcChart" class="chart" role="img" aria-label="Forecast of the lowest balance in each month"></div>
+      <details class="table-view"><summary>Show as table</summary><div id="fcTable"></div></details>
+    </div>
+
+    <div class="card">
+      <div class="card-head"><h2>Money in and out per month</h2><span class="muted small">CHF</span></div>
+      <div class="legend"><span><i class="sw sw-in"></i>Money in</span><span><i class="sw sw-out"></i>Money out</span></div>
+      <div id="cfChart" class="chart" role="img" aria-label="Money in and out per month"></div>
+      <p class="muted small" id="varNote"></p>
+    </div>
+
+    <div class="card">
+      <div class="card-head"><h2>Sinking funds and goals</h2><button class="link-btn" id="addEnvelope">+ Add</button></div>
+      <p class="muted small" id="envSummary"></p>
+      <div id="envList"></div>
+      <div id="envSuggest"></div>
+    </div>
+
+    <div class="card">
+      <div class="card-head"><h2>Coming up</h2><span class="muted small">next 45 days</span></div>
+      <div id="upcoming"></div>
+    </div>
+
+    <div class="card">
+      <div class="card-head"><h2>Recurring and planned</h2><button class="link-btn" id="addRecurring">+ Add</button></div>
+      <div id="recList" class="list"></div>
+    </div>
+  </section>
+
+  <!-- MORE -->
+  <section id="view-settings" class="view" hidden>
+    <div class="card">
+      <div class="card-head"><h2>Accounts</h2><button class="link-btn" id="addAccount">+ Add</button></div>
+      <div id="accList" class="list"></div>
+    </div>
+    <div class="card">
+      <div class="card-head"><h2>Categories and monthly budgets</h2><button class="link-btn" id="addCategory">+ Add</button></div>
+      <div id="catList" class="list"></div>
+      <div class="list-total"><span>Total budget</span><span id="catTotal" class="num"></span></div>
+    </div>
+    <div class="card">
+      <div class="card-head"><h2>Transfer costs</h2><span class="muted small">vs market rate</span></div>
+      <div id="costBox" class="muted small">Open this screen while online to load.</div>
+    </div>
+    <div class="card">
+      <h2>Connection</h2>
+      <p class="muted small">Paste the Web app URL and the app key from your Apps Script. They are kept only on this device.</p>
+      <label>Web app URL<input id="sUrl" type="url" placeholder="https://script.google.com/macros/s/…/exec"></label>
+      <label>App key<input id="sKey" type="password" placeholder="Secret key"></label>
+      <button class="btn-primary" id="sSave">Save and test</button>
+      <div id="sResult" class="small" role="status"></div>
+    </div>
+    <div class="card">
+      <h2>Waiting to upload</h2>
+      <p id="queueInfo" class="muted small">Nothing waiting.</p>
+      <button class="btn-secondary" id="syncNow">Upload now</button>
+    </div>
+    <p class="muted small center">Finances app · v4</p>
+  </section>
+</main>
+
+<nav class="tabbar">
+  <button data-view="home" class="active"><svg class="ti" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 20V10M10 20V4M16 20v-7M22 20H2"/></svg>Home</button>
+  <button data-view="activity"><svg class="ti" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 6h16M4 12h16M4 18h10"/></svg>Activity</button>
+  <button data-view="add" class="add-tab" aria-label="Add"><span class="plus">+</span></button>
+  <button data-view="plan"><svg class="ti" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 17l5-5 4 3 7-8M15 7h4v4"/></svg>Plan</button>
+  <button data-view="settings"><svg class="ti" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6zM19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></svg>More</button>
+</nav>
+
+<dialog id="sheet" class="sheet">
+  <form id="sheetForm" method="dialog" novalidate>
+    <div class="sheet-head">
+      <button type="button" class="link-btn" id="sheetCancel">Cancel</button>
+      <h2 id="sheetTitle"></h2>
+      <button type="submit" class="link-btn strong" id="sheetSave">Save</button>
+    </div>
+    <div id="sheetBody"></div>
+    <div id="sheetError" class="form-error" role="alert" hidden></div>
+    <button type="button" class="btn-danger" id="sheetDelete" hidden>Delete</button>
+  </form>
+</dialog>
+
+<div id="toast" class="toast" role="status" hidden></div>
+<div id="tooltip" class="tooltip" hidden></div>
+
+<script src="app.js"></script>
+</body>
+</html>
