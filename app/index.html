@@ -232,7 +232,7 @@
       <p id="queueInfo" class="muted small">Nothing waiting.</p>
       <button class="btn-secondary" id="syncNow">Upload now</button>
     </div>
-    <p class="muted small center">Finances app · v4</p>
+    <p class="muted small center">Finances app · v5</p>
   </section>
 </main>
 
@@ -257,6 +257,10 @@
   </form>
 </dialog>
 
+<div id="progress" class="progress" hidden aria-hidden="true"></div>
+<div id="busy" class="busy" hidden role="alert" aria-live="assertive" aria-busy="true">
+  <div class="busy-box"><div class="spinner" aria-hidden="true"></div><span id="busyText">Saving…</span></div>
+</div>
 <div id="toast" class="toast" role="status" hidden></div>
 <div id="tooltip" class="tooltip" hidden></div>
 

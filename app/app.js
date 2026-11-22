@@ -56,9 +56,47 @@
 
   // ---------- API ----------
   class NetworkError extends Error {}
-  async function api(action, payload = {}) {
+  // Actions that change your data show a full-screen loader that blocks taps,
+  // so nothing can be sent twice. Reading data only shows a thin bar at the top.
+  const BUSY_TEXT = {
+    addExpense: 'Saving…', addIncome: 'Saving…', addTransfer: 'Saving…', updateEntry: 'Saving changes…',
+    deleteEntry: 'Deleting…', saveAccount: 'Saving account…', deleteAccount: 'Deleting…',
+    saveCategory: 'Saving…', deleteCategory: 'Deleting…', saveRecurring: 'Saving and updating the forecast…',
+    deleteRecurring: 'Deleting…', markPaid: 'Recording the payment…', skipPayment: 'Skipping…',
+    reconcile: 'Adding the correction…', saveEnvelope: 'Saving…', deleteEnvelope: 'Deleting…', moveEnvelope: 'Updating…',
+  };
+  let busyCount = 0, loadCount = 0, busyTimer = null;
+  function busyStart(text) {
+    const el = $('#busy');
+    // Inside an open sheet the loader must live in the sheet to appear on top of it.
+    const host = document.querySelector('dialog[open]') || document.body;
+    if (el.parentNode !== host) host.appendChild(el);
+    $('#busyText').textContent = text;
+    busyCount++;
+    el.hidden = false; el.classList.remove('show');
+    clearTimeout(busyTimer);
+    busyTimer = setTimeout(() => el.classList.add('show'), 150);   // no flash for very quick replies
+    if (document.activeElement && document.activeElement.blur) document.activeElement.blur();
+  }
+  function busyEnd() {
+    busyCount = Math.max(0, busyCount - 1);
+    if (busyCount) return;
+    clearTimeout(busyTimer);
+    const el = $('#busy'); el.hidden = true; el.classList.remove('show');
+  }
+  function loadStart() { loadCount++; $('#progress').hidden = false; }
+  function loadEnd() { loadCount = Math.max(0, loadCount - 1); if (!loadCount) $('#progress').hidden = true; }
+
+  async function api(action, payload = {}, opts = {}) {
+    const write = !!BUSY_TEXT[action] && !opts.silent;
+    if (write && busyCount) throw new Error('Please wait, the previous action is still running.');
+    if (write) busyStart(BUSY_TEXT[action]); else loadStart();
+    try { return await apiCall(action, payload); }
+    finally { if (write) busyEnd(); else loadEnd(); }
+  }
+  async function apiCall(action, payload) {
     const { url, key } = cfg();
-    if (!url || !key) throw new Error('Open Settings and add the Web app URL and key.');
+    if (!url || !key) throw new Error('Open More and add the Web app URL and key.');
     let res;
     try {
       res = await fetch(url, {
@@ -140,7 +178,7 @@
       while (q.length) {
         const job = q[0];
         try {
-          const r = await api(job.action, { entry: job.entry });
+          const r = await api(job.action, { entry: job.entry }, { silent: true });
           saveSummary(r.summary);
         } catch (e) {
           if (e instanceof NetworkError) break;
