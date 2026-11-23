@@ -421,6 +421,7 @@
     $('#formError').hidden = true;
     if (t === 'transfer') updateTransferCurrencies();
   }
+  function accountType(name) { const a = (state.boot && state.boot.accounts || []).find(x => x.name === name); return a ? a.type : ''; }
   function accountCurrency(name) { const a = (state.boot && state.boot.accounts || []).find(x => x.name === name); return a ? a.currency : 'CHF'; }
   function updateTransferCurrencies() {
     const fc = accountCurrency($('#fFrom').value), tc = accountCurrency($('#fTo').value);
@@ -798,16 +799,19 @@
     $('#fcAccounts').innerHTML = chips.map(c => '<button type="button" class="chip' + (c.k === state.fcAccount ? ' active' : '') + '" data-fc="' + esc(c.k) + '">' + esc(c.label) + '</button>').join('');
     renderForecastChart(p);
     renderCashflowChart(p);
+    $('#varBreakdown').innerHTML = '<table><tr><th>Category</th><th>Per month</th><th>Charged to</th></tr>' +
+      p.variable.perCategory.filter(v => v.monthly > 0).map(v => '<tr><td>' + esc(v.category) + '</td><td>' + money0(v.monthly) + '</td><td>' + esc(v.account) + '</td></tr>').join('') + '</table>' +
+      '<p class="small">Per category: your ' + (p.variable.method === 'budget' ? 'monthly budget' : '3-month average') + ' minus what is already planned in that category (yearly items count 1/12 a month). Charged to the account you use most for that category; if that is a credit card, add a planned transfer that pays the card\'s full balance.</p>';
     $('#varNote').textContent = 'Money out includes planned items and expected day-to-day spending of about ' + money0(p.variable.monthlyCHF) + ' CHF a month, ' +
       (p.variable.method === 'budget' ? 'taken from your budgets (the app switches to your real 3-month average once it has 3 full months).' : 'based on your last 3 months.');
 
     // Coming up
     $('#upcoming').innerHTML = p.upcoming.length ? p.upcoming.map((u, i) => {
       const d = new Date(u.date + 'T12:00:00');
-      const sub = (u.kind === 'transfer' ? u.account + ' → ' + u.toAccount : u.account) + (u.overdue ? ' · overdue' : u.date !== u.due ? ' · moved from ' + dateShort(u.due).slice(0, -5) : '');
+      const sub = (u.kind === 'transfer' ? u.account + ' → ' + u.toAccount + (u.fullBalance ? ' · full balance' : '') : u.account) + (u.overdue ? ' · overdue' : u.date !== u.due ? ' · moved from ' + dateShort(u.due).slice(0, -5) : '');
       return '<div class="up"><div class="up-date' + (u.overdue ? ' overdue' : '') + '"><b>' + d.getDate() + '</b>' + d.toLocaleDateString('en-GB', { month: 'short' }) + '</div>' +
         '<div class="up-main"><div class="up-title">' + esc(u.description) + '</div><div class="up-sub">' + esc(sub) + '</div></div>' +
-        '<div><div class="up-amt' + (u.kind === 'income' ? ' in' : '') + '">' + (u.kind === 'income' ? '+' : '') + money(u.amount, u.currency) + '</div>' +
+        '<div><div class="up-amt' + (u.kind === 'income' ? ' in' : '') + '">' + (u.kind === 'income' ? '+' : u.estimated ? '≈ ' : '') + money(u.amount, u.currency) + '</div>' +
         '<div class="up-btns"><button class="mini" data-skip="' + i + '">Skip</button><button class="mini primary" data-paid="' + i + '">' + (u.kind === 'income' ? 'Received' : 'Paid') + '</button></div></div></div>';
     }).join('') : '<div class="muted small">Nothing due in the next 45 days.</div>';
 
@@ -818,7 +822,7 @@
     $('#recList').innerHTML = rec.map(r =>
       '<div class="li" data-rec="' + r.row + '"><div><div>' + esc(r.description) + '</div><div class="li-sub">' + esc(r.repeats) + ' · ' +
       (r.kind === 'transfer' ? esc(r.account) + ' → ' + esc(r.toAccount) : esc(r.account)) + (r.next ? ' · next ' + dateShort(r.next) : ' · done') + '</div></div>' +
-      '<div class="li-right">' + (r.kind === 'income' ? '+' : '') + money0(Math.abs(r.amount)) + ' ' + esc(r.currency) + '</div></div>').join('') || '<div class="muted small">Nothing planned yet.</div>';
+      '<div class="li-right">' + (r.fullBalance ? 'Full balance' : (r.kind === 'income' ? '+' : '') + money0(Math.abs(r.amount)) + ' ' + esc(r.currency)) + '</div></div>').join('') || '<div class="muted small">Nothing planned yet.</div>';
   }
 
   function niceRange(lo, hi) {
@@ -943,7 +947,8 @@
     $('#sheetDelete').hidden = true;
     $('#sheetSave').textContent = 'Save';
     const accOpts = b.accounts.map(a => '<option value="' + esc(a.name) + '"' + (a.name === u.account ? ' selected' : '') + '>' + esc(a.name) + '</option>').join('');
-    let html = '<p class="muted small">' + esc(u.description) + ' · due ' + dateShort(u.due) + '. This adds the ' + (u.kind === 'transfer' ? 'transfer' : u.kind === 'income' ? 'income' : 'expense') + ' to your records.</p>';
+    let html = '<p class="muted small">' + esc(u.description) + ' · due ' + dateShort(u.due) + '. This adds the ' + (u.kind === 'transfer' ? 'transfer' : u.kind === 'income' ? 'income' : 'expense') + ' to your records.' +
+      (u.fullBalance ? ' The amount is the forecast; type what you actually paid.' : '') + '</p>';
     html += field('Amount (' + esc(u.currency) + ')', '<input id="pAmount" inputmode="decimal" value="' + Number(u.amount).toFixed(2) + '">');
     html += field('Date', '<input id="pDate" type="date" value="' + (isToday ? today() : u.date) + '">');
     html += field(u.kind === 'income' ? 'Received into' : u.kind === 'transfer' ? 'From' : 'Paid from', '<select id="pAcc">' + accOpts + '</select>');
@@ -993,7 +998,8 @@
     html += '<div id="rCatWrap">' + field('Category', '<select id="rCat"><option value=""></option>' + opts(b.categories, r && r.kind === 'expense' ? r.category : '') + '</select>') + '</div>';
     html += '<div id="rTypeWrap">' + field('Income type', '<input id="rType" list="rTypeList" value="' + esc(r && r.kind === 'income' ? r.category : 'Salary') + '"><datalist id="rTypeList"><option>Salary</option><option>Bonus</option><option>Refund</option><option>Repayment</option><option>Other</option></datalist>') + '</div>';
     html += field('<span id="rAccLabel">Account</span>', '<select id="rAcc">' + opts(accList, r ? r.account : (b.lastAccount || accList[0])) + '</select>');
-    html += '<div id="rToWrap">' + field('To account', '<select id="rTo">' + opts(accList, r ? r.toAccount : '') + '</select>') + '</div>';
+    html += '<div id="rToWrap">' + field('To account', '<select id="rTo">' + opts(accList, r ? r.toAccount : '') + '</select>') +
+      '<label class="check"><input type="checkbox" id="rFull"' + (r && r.fullBalance ? ' checked' : '') + '><span>Pay the full balance of the To account each time <span class="muted">(for credit cards: the forecast pays off whatever the card owes on that day)</span></span></label></div>';
     html += '<div class="row2">' + field('Repeats', '<select id="rRep">' + opts(p.repeatsOptions, r ? r.repeats : 'Monthly') + '</select>') +
       field('First due', '<input id="rFirst" type="date" value="' + (r ? r.first : today()) + '">') + '</div>';
     html += '<div class="row2">' + field('Ends on <span class="muted">(optional)</span>', '<input id="rEnds" type="date" value="' + (r ? r.endsOn : '') + '">') +
@@ -1006,7 +1012,15 @@
       $('#rCatWrap').hidden = k !== 'expense'; $('#rTypeWrap').hidden = k !== 'income'; $('#rToWrap').hidden = k !== 'transfer';
       $('#rAccLabel').textContent = k === 'income' ? 'Received into' : k === 'transfer' ? 'From account' : 'Paid from';
       sheetMode.kind = k;
+      fullToggle();
     };
+    const fullToggle = () => {
+      const on = sheetMode.kind === 'transfer' && $('#rFull').checked;
+      $('#rAmount').disabled = on; $('#rAmount').placeholder = on ? 'Calculated each time' : '0.00';
+      if (on) $('#rAmount').value = '';
+    };
+    $('#rFull').onchange = fullToggle;
+    $('#rTo').onchange = () => { if (accountType($('#rTo').value) === 'Credit card' && !r) { $('#rFull').checked = true; fullToggle(); } };
     $('#rKind').onclick = e => { const x = e.target.closest('button'); if (x) setKind(x.dataset.k); };
     setKind(kind);
     $('#sheet').showModal();
@@ -1014,8 +1028,10 @@
   async function saveRecurringSheet() {
     const r = sheetMode.item, k = sheetMode.kind;
     const errEl = $('#sheetError'); errEl.hidden = true;
-    const amount = parseNum($('#rAmount').value);
+    const full = k === 'transfer' && $('#rFull').checked;
+    const amount = full ? 0 : parseNum($('#rAmount').value);
     const item = {
+      fullBalance: full,
       row: r ? r.row : null, original: r ? r.description : '', kind: k,
       description: $('#rDesc').value.trim(), amount, currency: $('#rCur').value,
       category: k === 'expense' ? $('#rCat').value : k === 'income' ? $('#rType').value.trim() : '',
