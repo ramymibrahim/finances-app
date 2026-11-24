@@ -71,27 +71,26 @@ Open the same address in Chrome, Edge or Safari, and enter the URL and key once.
 - **Categories and budgets** (More screen): add a category, change a monthly budget, or rename one. A new name is updated in the Log, Planned and Items. A category that has entries can't be deleted.
 - **Bank rate**: type it only when you want the exact rate your bank used. Otherwise the sheet's rate for that date is used, as before.
 
-## Monthly plan (Plan tab, at the top)
+## Money left over (Plan tab, at the top)
 
-For each of the next 24 months, in CHF:
-**income expected − planned payments − day-to-day budget − set aside for funds and goals + paid from funds − savings = left over.**
+Everything in CHF, for the next 24 months:
+**income expected − planned payments − spending − set aside for funds and goals + paid from funds − savings = left over.**
 
-- **Free money now** = all your accounts in CHF (card and overdraft debt count as minus) minus what is set aside in funds and goals. Each month's "left over" is added to it, so **Free at month end** shows where you will stand.
-- **Transfers between your own accounts are left out** (CHF → EGP, paying off a card): they don't change the total. Card spending is already in the day-to-day budget.
-- **Day-to-day budget**, per category and month: the budget minus what is planned in that category in that month, never below 0 (Rent: 2,000 − 1,700 = 300). After 3 full months of records, your real 3-month average replaces the budget. The first row only counts the days left in the current month.
+- **Free money now** = all your accounts in CHF (card and overdraft debt count as minus) minus what is set aside in funds and goals. Each month's "left over" is added to it: the chart shows your free money at the end of each month.
+- **Two lines:**
+  - **Following your budget** (blue): spending = each category's budget minus what is already planned in it that month (never below 0). For the current month: only what is still left in each budget.
+  - **At your real pace** (orange, dashed): spending = what you really spend outside planned payments. First from this month's records (rough until you have a full month), then your average of the last 1–3 full months. Categories above budget are marked ▲ under "Budget and pace by category".
+- **Switch** "Following budget / Your real pace" to see the table for either line; tap a month for its lines.
+- **Transfers between your own accounts don't count** (CHF → EGP, paying off a card).
 - **Savings** is the "Monthly savings goal" in your Cash flow tab; change it with **Savings … ✎**.
-- A sinking fund linked to a bill pays for that bill in the month it is due ("Paid from funds").
-- Tap a month to see its lines.
+- A sinking fund linked to a bill pays for that bill in its month ("Paid from funds").
 
-The day-by-day check below it still looks at each account separately, to warn you when one account (for example CIB EGP) runs short.
+There is no per-account estimate any more. Coming up and Recurring and planned work as before.
 
 ## The Plan tab
 
-- **Warnings:** every account is checked day by day for the next 24 months. You get a warning when an account would go below its **safety cushion** (set it in More → Accounts; empty means 0, and credit cards get no warning unless you set one). The warning says when it starts, the lowest point, and, when possible, which account could cover it.
-- **Lowest balance each month:** pick "All (CHF)" or one account. Red dots are months below the cushion. Tap or hover to see the date and amount.
-- **Money in and out per month:** planned items plus expected day-to-day spending. Until you have 3 full months of records, the app uses your monthly budgets for day-to-day spending (minus what is already planned in that category), then it switches to your real 3-month average.
 - **Coming up (45 days):** tap **Paid** (or **Received**) to add it to your records with one tap. You can change the amount, date and account first. **Skip** moves the item on without recording anything.
-- **Paying off credit cards:** add a monthly **Transfer** from your bank account to the card and tick **Pay the full balance**. On each due date the forecast pays off whatever the card owes that day, so card spending isn't left to pile up. The amount in Coming up is the forecast (marked ≈); when you tap Paid, type what you actually paid. In the sheet this is column R of Planned (**Pay full balance** = Yes).
+- **Paying off credit cards:** add a monthly **Transfer** from your bank account to the card and tick **Pay the full balance**. The amount in Coming up is what the card owes today (marked ≈); when you tap Paid, type what you actually paid. In the sheet this is column R of Planned (**Pay full balance** = Yes).
 - **Recurring and planned:** everything in your Planned tab. Tap an item to change it, or **+ Add**. Use **Money in** for salary or money owed to you, and **Transfer** for moving money between your accounts, for example a monthly CHF → EGP transfer or paying off a credit card.
 
 **What the app changes in your sheet the first time it runs:**

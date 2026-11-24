@@ -341,3 +341,11 @@ label.check input { width: 22px; height: 22px; min-height: 0; margin: 1px 0 0; f
 .mp-lines { margin-top: 8px; padding: 8px 10px; background: var(--page); border-radius: 10px; font-size: 14px; }
 .mp-lines .kv { padding: 4px 0; }
 .mp-lines .kv.total { font-weight: 650; border-top: 1px solid var(--line); margin-top: 4px; padding-top: 6px; }
+
+.mp-switch { grid-template-columns: 1fr 1fr; margin: 12px 0 4px; }
+.sw-dash { background: repeating-linear-gradient(90deg, var(--series-2) 0 4px, transparent 4px 6px) !important; height: 4px !important; vertical-align: 2px !important; }
+.chart .line-budget { fill: none; stroke: var(--accent); stroke-width: 2; stroke-linejoin: round; }
+.chart .line-pace { fill: none; stroke: var(--series-2); stroke-width: 2; stroke-dasharray: 6 4; stroke-linejoin: round; }
+.chart .dot-b { fill: var(--accent); stroke: var(--card); stroke-width: 2; }
+.chart .dot-p { fill: var(--series-2); stroke: var(--card); stroke-width: 2; }
+.chart .zero { stroke: var(--ink-2); stroke-width: 1; opacity: .5; }

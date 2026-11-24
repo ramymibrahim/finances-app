@@ -743,148 +743,33 @@ function plan_() {
   const accBy = {}; accounts.forEach(a => { accBy[a.name] = a; });
   const planned = plannedRows_(ss);
 
-  // ---- Events: planned items ----
-  const events = [];   // {date, account, amount (in account currency, + in / - out), chf, label}
+  // ---- Coming up: the next 45 days (and unpaid overdue items) ----
   const upcoming = [];
   const in45 = addDays_(today, 45);
   planned.forEach(p => {
     const kind = kindOfPlanned_(p);
-    openOccurrences_(p, today, end).forEach(o => {
-      const when = o.date < today ? today : o.date;
-      const chf = Math.abs(p.amount) * rate(p.currency);
-      const toAcc = a => accBy[a] ? chf / rate(accBy[a].currency) : 0;
-      if (kind === 'transfer' && p.fullBalance) {
-        events.push({ date: when, settle: true, from: p.account, to: p.toAccount, key: p.row + '|' + ymd_(o.due) });
-      } else if (kind === 'transfer') {
-        events.push({ date: when, account: p.account, amount: -toAcc(p.account), chf: 0 });
-        events.push({ date: when, account: p.toAccount, amount: toAcc(p.toAccount), chf: 0 });
-      } else {
-        const sign = kind === 'income' ? 1 : -1;
-        events.push({ date: when, account: p.account, amount: sign * toAcc(p.account), chf: sign * chf, kind });
+    openOccurrences_(p, today, in45).forEach(o => {
+      const u = { row: p.row, description: p.description, kind, due: ymd_(o.due), date: ymd_(o.date), fullBalance: p.fullBalance,
+        overdue: o.date < today, amount: Math.abs(p.amount), currency: p.currency, category: p.category,
+        account: p.account, toAccount: p.toAccount, chf: round2_(Math.abs(p.amount) * rate(p.currency)), repeats: p.repeats };
+      if (p.fullBalance) {
+        // What the card owes today, in the paying account's currency.
+        const to = accBy[p.toAccount], from = accBy[p.account];
+        u.amount = to && from ? round2_(Math.max(0, -to.balance) * to.rate / from.rate) : 0;
+        u.currency = from ? from.currency : p.currency;
+        u.chf = round2_(u.amount * (from ? from.rate : 1)); u.estimated = true;
       }
-      if (o.date <= in45) {
-        upcoming.push({ row: p.row, description: p.description, kind, due: ymd_(o.due), date: ymd_(o.date), fullBalance: p.fullBalance,
-          overdue: o.date < today, amount: Math.abs(p.amount), currency: p.currency, category: p.category,
-          account: p.account, toAccount: p.toAccount, chf: round2_(chf), repeats: p.repeats });
-      }
+      upcoming.push(u);
     });
-  });
-
-  // ---- Day-to-day spending: per category and month, the budget (or 3-month
-  // average) minus what is planned in that category in that month ----
-  const variable = variableSpending_(ss, s, planned, rate, accounts);
-  const monthKeys = [];
-  for (let i = 0; i < FORECAST_MONTHS; i++) monthKeys.push(ymd_(addMonths_(new Date(today.getFullYear(), today.getMonth(), 1), i)).slice(0, 7));
-  const plannedCat = {};   // month -> category -> CHF planned (paid or not)
-  planned.forEach(p => {
-    if (kindOfPlanned_(p) !== 'expense' || ['Cancelled', 'Stopped', 'Skipped'].indexOf(p.status) >= 0) return;
-    occurrences_(p, new Date(today.getFullYear(), today.getMonth(), 1), end).forEach(due => {
-      const mk = ymd_(shiftWeekend_(due, p.weekend)).slice(0, 7);
-      const m = plannedCat[mk] || (plannedCat[mk] = {});
-      m[p.category] = (m[p.category] || 0) + p.amount * rate(p.currency);
-    });
-  });
-  const ddMonth = (mk, v) => Math.max(0, v.base - ((plannedCat[mk] || {})[v.category] || 0));
-  variable.perCategory.forEach(v => {
-    if (!accBy[v.account]) return;
-    for (let d = addDays_(today, 1); d <= end; d = addDays_(d, 1)) {
-      const dim = new Date(d.getFullYear(), d.getMonth() + 1, 0).getDate();
-      const chf = ddMonth(ymd_(d).slice(0, 7), v) / dim;
-      if (chf > 0) events.push({ date: d, account: v.account, amount: -chf / rate(accBy[v.account].currency), chf: -chf, kind: 'variable' });
-    }
-  });
-
-  // ---- Simulate day by day ----
-  const byDay = {};
-  events.forEach(e => { const k = ymd_(e.date); (byDay[k] = byDay[k] || []).push(e); });
-  const bal = {}; accounts.forEach(a => { bal[a.name] = a.balance; });
-  const months = [];
-  const accMonths = {}; accounts.forEach(a => { accMonths[a.name] = []; });
-  const breach = {};
-  const settled = {};
-  let cur = null;
-  for (let d = new Date(today); d <= end; d = addDays_(d, 1)) {
-    const key = ymd_(d);
-    const mk = key.slice(0, 7);
-    if (!cur || cur.month !== mk) {
-      cur = { month: mk, in: 0, out: 0, planned: 0, variable: 0, min: Infinity, minDate: key, end: 0 };
-      months.push(cur);
-      accounts.forEach(a => accMonths[a.name].push({ month: mk, min: Infinity, minDate: key, end: 0 }));
-    }
-    const todays = (byDay[key] || []).slice().sort((a, b) => (a.settle ? 1 : 0) - (b.settle ? 1 : 0));
-    todays.forEach(e => {
-      if (e.settle) {
-        // Pay off what the card owes at that moment.
-        if (bal[e.to] === undefined || bal[e.from] === undefined) return;
-        const owed = Math.max(0, -bal[e.to]);
-        const fromAmt = owed * accBy[e.to].rate / accBy[e.from].rate;
-        bal[e.to] += owed; bal[e.from] -= fromAmt;
-        settled[e.key] = { amount: fromAmt, currency: accBy[e.from].currency };
-        return;
-      }
-      if (bal[e.account] === undefined) return;
-      bal[e.account] += e.amount;
-      if (e.chf > 0) cur.in += e.chf;
-      if (e.chf < 0) { cur.out -= e.chf; if (e.kind === 'variable') cur.variable -= e.chf; else cur.planned -= e.chf; }
-    });
-    let total = 0;
-    accounts.forEach(a => {
-      const b = bal[a.name];
-      total += b * a.rate;
-      const am = accMonths[a.name][accMonths[a.name].length - 1];
-      if (b < am.min) { am.min = b; am.minDate = key; }
-      am.end = b;
-      const limit = cushionOf_(a);
-      if (limit !== null && b < limit - 0.005) {
-        const br = breach[a.name] || (breach[a.name] = { first: key, lowest: b, lowestDate: key });
-        if (b < br.lowest) { br.lowest = b; br.lowestDate = key; }
-      }
-    });
-    if (total < cur.min) { cur.min = total; cur.minDate = key; }
-    cur.end = total;
-  }
-
-  // ---- Gap warnings with a suggested transfer ----
-  const gaps = Object.keys(breach).map(name => {
-    const a = accBy[name], br = breach[name], limit = cushionOf_(a);
-    const short = limit - br.lowest;
-    // Which account could cover it: lowest point stays above its own cushion after giving the money.
-    let from = null;
-    accounts.forEach(o => {
-      if (o.name === name || o.type === 'Credit card' || breach[o.name]) return;
-      const spare = (Math.min.apply(null, accMonths[o.name].map(m => m.min)) - (cushionOf_(o) || 0)) * o.rate;
-      if (spare > short * a.rate && (!from || spare > from.spare)) from = { name: o.name, spare };
-    });
-    return { account: name, currency: a.currency, cushion: limit, firstDate: br.first, lowest: round2_(br.lowest),
-      lowestDate: br.lowestDate, short: round2_(short), shortCHF: round2_(short * a.rate),
-      suggestFrom: from ? from.name : '' };
-  }).sort((x, y) => x.firstDate < y.firstDate ? -1 : 1);
-
-  upcoming.forEach(u => {
-    if (!u.fullBalance) return;
-    const st = settled[u.row + '|' + u.due];
-    const from = accBy[u.account];
-    u.amount = round2_(st ? st.amount : 0); u.currency = st ? st.currency : (from ? from.currency : u.currency);
-    u.chf = round2_(u.amount * (from ? from.rate : 1)); u.estimated = true;
   });
   upcoming.sort((a, b) => a.date < b.date ? -1 : a.date > b.date ? 1 : a.description < b.description ? -1 : 1);
-  const r2 = m => ({ month: m.month, in: round2_(m.in), out: round2_(m.out), planned: round2_(m.planned),
-    variable: round2_(m.variable), min: round2_(m.min), minDate: m.minDate, end: round2_(m.end) });
 
+  const monthly = monthlyPlan_(ss, { today, end, planned, rate, settings: s, accounts });
   return {
     today: ymd_(today),
-    months: months.map(r2),
-    accounts: accounts.map(a => ({
-      name: a.name, currency: a.currency, type: a.type, balance: round2_(a.balance), rate: a.rate,
-      cushion: cushionOf_(a), months: accMonths[a.name].map(m => ({ month: m.month, min: round2_(m.min), minDate: m.minDate, end: round2_(m.end) }))
-    })),
-    totalCushionCHF: round2_(accounts.reduce((t, a) => t + Math.max(0, cushionOf_(a) || 0) * a.rate, 0)),
-    gaps, upcoming,
-    variable: { method: variable.method, month: monthKeys[1],
-      monthlyCHF: round2_(variable.perCategory.reduce((t, v) => t + ddMonth(monthKeys[1], v), 0)),
-      perCategory: variable.perCategory.map(v => ({ category: v.category, base: round2_(v.base),
-        planned: round2_((plannedCat[monthKeys[1]] || {})[v.category] || 0), monthly: round2_(ddMonth(monthKeys[1], v)), account: v.account })) },
-    monthly: monthlyPlan_(ss, { today, end, monthKeys, planned, rate, variable, ddMonth, accounts }),
+    upcoming,
+    monthly,
+    budget: monthly.budget,
     recurring: planned.map(p => ({
       row: p.row, first: ymd_(p.first), description: p.description, amount: p.amount, currency: p.currency,
       category: p.category, repeats: p.repeats, account: p.account, status: p.status, note: p.note,
@@ -901,38 +786,6 @@ function plan_() {
 function cushionOf_(a) {
   if (a.cushion !== null && a.cushion !== undefined) return a.cushion;
   return a.type === 'Credit card' ? null : 0;
-}
-
-// Expected day-to-day spending per category (CHF a month), on top of planned items.
-// Uses the average of the last 3 full months once you have them, otherwise your budgets.
-function variableSpending_(ss, s, planned, rate, accounts) {
-  const today = dayOf_(new Date());
-  const log = logRows_(ss);
-  const firstMonth = new Date(today.getFullYear(), today.getMonth() - 3, 1);
-  const thisMonth = new Date(today.getFullYear(), today.getMonth(), 1);
-  const oldest = log.reduce((m, e) => e.date < m ? e.date : m, today);
-  const method = oldest <= firstMonth ? 'average' : 'budget';
-
-  // Usual account per category: the one used most often.
-  const useCount = {};
-  log.forEach(e => { const k = e.category + '|' + e.account; useCount[k] = (useCount[k] || 0) + 1; });
-  const fallback = (accounts.find(a => a.currency === 'CHF' && a.type === 'Current') || accounts[0] || {}).name;
-  const usualAccount = cat => {
-    let best = null, n = 0;
-    Object.keys(useCount).forEach(k => { const [c, a] = k.split('|'); if (c === cat && useCount[k] > n) { n = useCount[k]; best = a; } });
-    return best || fallback;
-  };
-  const perCategory = s.categories.map(c => {
-    let monthly;
-    if (method === 'average') {
-      const spent = log.filter(e => e.category === c.name && e.date >= firstMonth && e.date < thisMonth).reduce((t, e) => t + e.chf, 0);
-      monthly = spent / 3;
-    } else {
-      monthly = c.budget;
-    }
-    return { category: c.name, base: Math.max(0, monthly), account: usualAccount(c.name) };
-  });
-  return { method, perCategory };
 }
 
 // ---- Recurring items: add / edit / delete ----
@@ -1451,11 +1304,29 @@ function saveSavingsTarget_(amount) {
   return plan_();
 }
 
+// Planned payments per category and month (CHF), paid or not; skipped/cancelled left out.
+function plannedByCategory_(planned, rate, from, to) {
+  const out = {};
+  planned.forEach(p => {
+    if (kindOfPlanned_(p) !== 'expense' || ['Cancelled', 'Stopped', 'Skipped'].indexOf(p.status) >= 0) return;
+    occurrences_(p, from, to).forEach(due => {
+      const d = shiftWeekend_(due, p.weekend), mk = ymd_(d).slice(0, 7);
+      const m = out[mk] || (out[mk] = {});
+      m[p.category] = (m[p.category] || 0) + p.amount * rate(p.currency);
+      (m['@dates'] || (m['@dates'] = [])).push({ cat: p.category, date: d, chf: p.amount * rate(p.currency) });
+    });
+  });
+  return out;
+}
+
 function monthlyPlan_(ss, c) {
-  const { today, end, monthKeys, planned, rate, variable, ddMonth, accounts } = c;
-  const rows = monthKeys.map((mk, i) => ({ month: mk, income: 0, planned: 0, dayToDay: 0, setAside: 0, fromFunds: 0, savings: 0 }));
+  const { today, end, planned, rate, settings, accounts } = c;
+  const monthStart = new Date(today.getFullYear(), today.getMonth(), 1);
+  const monthKeys = [];
+  for (let i = 0; i < FORECAST_MONTHS; i++) monthKeys.push(ymd_(addMonths_(monthStart, i)).slice(0, 7));
+  const rows = monthKeys.map(mk => ({ month: mk, income: 0, planned: 0, budget: 0, pace: 0, setAside: 0, fromFunds: 0, savings: 0 }));
   const idx = {}; monthKeys.forEach((mk, i) => { idx[mk] = i; });
-  const billsByMonth = {};   // month -> description -> CHF (for linked sinking funds)
+  const billsByMonth = {};
 
   // Income and planned payments still open (overdue ones count this month)
   planned.forEach(p => {
@@ -1474,12 +1345,56 @@ function monthlyPlan_(ss, c) {
     });
   });
 
-  // Day-to-day: this month only for the days left after today
-  const dimNow = new Date(today.getFullYear(), today.getMonth() + 1, 0).getDate();
-  const restShare = (dimNow - today.getDate()) / dimNow;
+  // ---- Spending outside planned payments, per category ----
+  // Budget: each category's budget minus what is planned in it that month (never below 0).
+  // Real pace: what you really spend outside planned payments.
+  const log = logRows_(ss).filter(e => e.category !== CORRECTION);
+  const histStart = new Date(today.getFullYear(), today.getMonth() - 3, 1);
+  const plannedCat = plannedByCategory_(planned, rate, histStart, end);
+  const spentIn = (mk, cat, until) => log.filter(e => ymd_(e.date).slice(0, 7) === mk && e.category === cat && (!until || e.date <= until)).reduce((t, e) => t + e.chf, 0);
+  const plannedUpTo = (mk, cat, until) => ((plannedCat[mk] || {})['@dates'] || []).filter(x => x.cat === cat && x.date <= until).reduce((t, x) => t + x.chf, 0);
+  const curMk = monthKeys[0];
+  const dim = new Date(today.getFullYear(), today.getMonth() + 1, 0).getDate();
+  const restShare = (dim - today.getDate()) / dim;
+
+  // Full months with records before this one (up to 3) decide the pace; otherwise this month's pace.
+  const oldest = log.reduce((m, e) => e.date < m ? e.date : m, today);
+  const fullMonths = [];
+  for (let i = 1; i <= 3; i++) {
+    const m0 = new Date(today.getFullYear(), today.getMonth() - i, 1);
+    if (oldest <= m0) fullMonths.push(ymd_(m0).slice(0, 7));   // records cover the whole month
+  }
+  // This month's pace only counts the days you have been recording.
+  const recFrom = oldest > monthStart ? oldest : monthStart;
+  const recDays = Math.round((today - recFrom) / 86400000) + 1;
+  const paceMethod = fullMonths.length ? 'average' : recDays >= 7 ? 'thisMonth' : 'budget';
+
+  const perCategory = settings.categories.map(cat => {
+    const name = cat.name;
+    const nextMk = monthKeys[1];
+    const budgetNext = Math.max(0, cat.budget - ((plannedCat[nextMk] || {})[name] || 0));
+    const actualNow = Math.max(0, spentIn(curMk, name, today) - plannedUpTo(curMk, name, today));
+    let pace;
+    if (paceMethod === 'average') {
+      pace = fullMonths.reduce((t, mk) => t + Math.max(0, spentIn(mk, name) - ((plannedCat[mk] || {})[name] || 0)), 0) / fullMonths.length;
+    } else if (paceMethod === 'thisMonth') {
+      pace = actualNow / recDays * dim;
+    } else {
+      pace = Math.max(0, cat.budget - ((plannedCat[curMk] || {})[name] || 0));
+    }
+    return { category: name, budget: cat.budget, planned: round2_((plannedCat[nextMk] || {})[name] || 0), budgetLeftMonthly: round2_(budgetNext),
+      budgetThisMonth: Math.max(0, cat.budget - ((plannedCat[curMk] || {})[name] || 0)), spentThisMonth: round2_(actualNow), pace: round2_(pace) };
+  });
+
   rows.forEach((r, i) => {
-    const full = variable.perCategory.reduce((t, v) => t + ddMonth(r.month, v), 0);
-    r.dayToDay = i === 0 ? full * restShare : full;
+    if (i === 0) {
+      // Rest of this month: what is still left in each budget / what your pace still adds
+      r.budget = perCategory.reduce((t, v) => t + Math.max(0, v.budgetThisMonth - v.spentThisMonth), 0);
+      r.pace = perCategory.reduce((t, v) => t + v.pace * restShare, 0);
+    } else {
+      r.budget = settings.categories.reduce((t, cat) => t + Math.max(0, cat.budget - ((plannedCat[r.month] || {})[cat.name] || 0)), 0);
+      r.pace = perCategory.reduce((t, v) => t + v.pace, 0);
+    }
   });
 
   // Funds and goals: monthly amount until the target; a linked bill is paid from its fund
@@ -1500,7 +1415,7 @@ function monthlyPlan_(ss, c) {
         const use = Math.min(saved, billsByMonth[r.month][e.linked]);
         r.fromFunds += use; saved -= use;
         const p = planned.find(x => x.description === e.linked);
-        const nxt = p ? occurrences_(p, addDays_(new Date(mStart.getFullYear(), mStart.getMonth() + 1, 1), 0), addMonths_(mStart, 30))[0] : null;
+        const nxt = p ? occurrences_(p, new Date(mStart.getFullYear(), mStart.getMonth() + 1, 1), addMonths_(mStart, 30))[0] : null;
         targetDate = nxt || targetDate;
       }
     });
@@ -1510,13 +1425,23 @@ function monthlyPlan_(ss, c) {
   const netWorth = accounts.reduce((t, a) => t + a.balanceCHF, 0);
   const reserved = E.reduce((t, e) => t + Math.max(0, e.saved), 0);
   const start = round2_(netWorth - reserved);
-  let free = start;
+  let free = start, freePace = start;
   rows.forEach(r => {
     r.savings = target;
-    ['income', 'planned', 'dayToDay', 'setAside', 'fromFunds', 'savings'].forEach(k => { r[k] = round2_(r[k]); });
-    r.left = round2_(r.income - r.planned - r.dayToDay - r.setAside + r.fromFunds - r.savings);
-    free = round2_(free + r.left);
-    r.free = free;
+    ['income', 'planned', 'budget', 'pace', 'setAside', 'fromFunds', 'savings'].forEach(k => { r[k] = round2_(r[k]); });
+    const common = r.income - r.planned - r.setAside + r.fromFunds - r.savings;
+    r.left = round2_(common - r.budget);
+    r.leftPace = round2_(common - r.pace);
+    free = round2_(free + r.left); freePace = round2_(freePace + r.leftPace);
+    r.free = free; r.freePace = freePace;
   });
-  return { start, savingsTarget: target, method: variable.method, rows };
+  return {
+    start, savingsTarget: target, paceMethod, paceMonths: fullMonths, paceDays: recDays, rows,
+    budget: {
+      month: monthKeys[1], paceMethod, paceDays: recDays,
+      monthlyBudget: round2_(perCategory.reduce((t, v) => t + v.budgetLeftMonthly, 0)),
+      monthlyPace: round2_(perCategory.reduce((t, v) => t + v.pace, 0)),
+      perCategory: perCategory.map(v => ({ category: v.category, budget: v.budget, planned: v.planned, budgetLeft: v.budgetLeftMonthly, spentThisMonth: v.spentThisMonth, pace: v.pace }))
+    }
+  };
 }

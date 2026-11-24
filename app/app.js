@@ -24,7 +24,6 @@
     activityItems: [],
     searchItems: [],
     plan: store.get('plan', null),
-    fcAccount: 'all',
   };
 
   // ---------- Helpers ----------
@@ -678,7 +677,6 @@
       html += field('Currency', '<select id="mCur">' + b.currencies.map(c => '<option' + (item && item.currency === c.code ? ' selected' : '') + '>' + esc(c.code) + '</option>').join('') + '</select>');
       html += field('Type', '<select id="mType">' + (b.accountTypes || ['Current', 'Credit card', 'Savings', 'Cash']).map(t => '<option' + (item && item.type === t ? ' selected' : '') + '>' + esc(t) + '</option>').join('') + '</select>');
       html += field('Starting balance <span class="muted">(use minus for debt, e.g. -1200)</span>', '<input id="mStart" inputmode="decimal" value="' + (item ? item.start : '') + '" placeholder="0.00">');
-      html += field('Safety cushion <span class="muted">(warn me if the balance goes below)</span>', '<input id="mCushion" inputmode="decimal" value="' + (item && item.cushion != null ? item.cushion : '') + '" placeholder="Empty = 0; no warning for credit cards">');
       if (item) html += '<p class="muted small">Renaming updates every entry that uses this account.</p>';
       if (item) html += '<div class="recon"><h3>Check against your bank</h3><p class="muted small">Type the balance your bank shows right now. Debt on a card is a minus number.</p>' +
         '<label>Bank balance (' + esc(item.currency) + ')<input id="rcBank" inputmode="decimal" placeholder="e.g. 2540.15"></label>' +
@@ -731,10 +729,7 @@
       if (mode === 'account') {
         const start = $('#mStart').value.trim() === '' ? 0 : parseSigned($('#mStart').value);
         if (!isFinite(start)) throw new Error('Starting balance must be a number.');
-        const cushionTxt = $('#mCushion').value.trim();
-        const cushion = cushionTxt === '' ? '' : parseSigned(cushionTxt);
-        if (cushion !== '' && !isFinite(cushion)) throw new Error('Safety cushion must be a number.');
-        const r = await api('saveAccount', { account: { original: item ? item.name : '', name: $('#mName').value.trim(), currency: $('#mCur').value, type: $('#mType').value, start, cushion } });
+        const r = await api('saveAccount', { account: { original: item ? item.name : '', name: $('#mName').value.trim(), currency: $('#mCur').value, type: $('#mType').value, start, cushion: item && item.cushion != null ? item.cushion : '' } });
         state.boot.accounts = r.accounts;
       } else {
         const budget = $('#mBudget').value.trim() === '' ? 0 : parseNum($('#mBudget').value);
@@ -786,27 +781,8 @@
 
   function renderPlan() {
     const p = state.plan;
-    if (!p) { $('#gapCard').innerHTML = '<div class="muted">' + (cfg().url ? 'Loading forecast…' : 'Connect first in More.') + '</div>'; return; }
-    // Gaps
-    $('#gapCard').innerHTML = '<div class="card-head"><h2>Warnings for the next 24 months</h2></div>' + (p.gaps.length ? p.gaps.map(g =>
-      '<div class="gap"><div class="gap-ic bad" aria-hidden="true">!</div><div><div class="gap-title">' + esc(g.account) + ' goes below ' + (g.cushion ? 'its cushion of ' + money0(g.cushion) + ' ' + esc(g.currency) : 'zero') + ' on ' + dateShort(g.firstDate) + '</div>' +
-      '<div class="gap-sub">Lowest point ' + money0(g.lowest) + ' ' + esc(g.currency) + ' on ' + dateShort(g.lowestDate) + ', about ' + money0(g.shortCHF) + ' CHF short.' +
-      (g.suggestFrom ? ' You could plan a transfer from ' + esc(g.suggestFrom) + '.' : ' Plan a transfer into this account, or reduce what is paid from it.') + '</div></div></div>').join('')
-      : '<div class="gap"><div class="gap-ic okay" aria-hidden="true">✓</div><div><div class="gap-title">No gaps found</div><div class="gap-sub">Every account stays above its safety cushion.</div></div></div>');
-
-    renderMonthlyPlan(p.monthly);
-
-    // Account chips
-    const chips = [{ k: 'all', label: 'All (CHF)' }].concat(p.accounts.map(a => ({ k: a.name, label: a.name })));
-    if (!chips.some(c => c.k === state.fcAccount)) state.fcAccount = 'all';
-    $('#fcAccounts').innerHTML = chips.map(c => '<button type="button" class="chip' + (c.k === state.fcAccount ? ' active' : '') + '" data-fc="' + esc(c.k) + '">' + esc(c.label) + '</button>').join('');
-    renderForecastChart(p);
-    renderCashflowChart(p);
-    $('#varBreakdown').innerHTML = '<p class="small">' + monthName(p.variable.month) + ':</p><table><tr><th>Category</th><th>' + (p.variable.method === 'budget' ? 'Budget' : 'Average') + '</th><th>Planned</th><th>Day-to-day</th></tr>' +
-      p.variable.perCategory.filter(v => v.base > 0 || v.planned > 0).map(v => '<tr><td>' + esc(v.category) + '<br><span class="muted">' + esc(v.account) + '</span></td><td>' + money0(v.base) + '</td><td>' + money0(v.planned) + '</td><td>' + money0(v.monthly) + '</td></tr>').join('') + '</table>' +
-      '<p class="small">Each month, per category: your ' + (p.variable.method === 'budget' ? 'monthly budget' : '3-month average') + ' minus what is planned in that category in that month (never below 0). It is charged to the account you use most for that category; if that is a credit card, add a planned transfer that pays the card\'s full balance.</p>';
-    $('#varNote').textContent = 'Money out includes planned items and expected day-to-day spending of about ' + money0(p.variable.monthlyCHF) + ' CHF a month, ' +
-      (p.variable.method === 'budget' ? 'taken from your budgets (the app switches to your real 3-month average once it has 3 full months).' : 'based on your last 3 months.');
+    if (!p) { $('#mpStart').innerHTML = '<span class="muted">' + (cfg().url ? 'Loading…' : 'Connect first in More.') + '</span>'; return; }
+    renderMonthlyPlan(p.monthly, p.budget);
 
     // Coming up
     $('#upcoming').innerHTML = p.upcoming.length ? p.upcoming.map((u, i) => {
@@ -869,77 +845,6 @@
     if (a >= 1e4) return sign + Math.round(a / 1e3) + 'k';
     if (a >= 1e3) return sign + (a / 1e3).toFixed(1).replace('.0', '') + 'k';
     return sign + Math.round(a);
-  }
-
-  function renderForecastChart(p) {
-    const el = $('#fcChart');
-    const W = el.clientWidth || 340, H = el.clientHeight || 190;
-    const m = { t: 14, r: 12, b: 22, l: 46 };
-    let rows, cushion, cur;
-    if (state.fcAccount === 'all') {
-      rows = p.months.map(x => ({ month: x.month, min: x.min, minDate: x.minDate, end: x.end }));
-      cushion = p.totalCushionCHF; cur = 'CHF';
-    } else {
-      const a = p.accounts.find(x => x.name === state.fcAccount);
-      rows = a.months; cushion = a.cushion; cur = a.currency;
-    }
-    $('#fcUnit').textContent = cur;
-    const vals = rows.map(r => r.min).concat(rows.map(r => r.end));
-    if (cushion != null) vals.push(cushion);
-    vals.push(0);
-    const rg = niceRange(Math.min.apply(null, vals), Math.max.apply(null, vals));
-    const n = rows.length;
-    const x = i => m.l + (n === 1 ? 0 : i / (n - 1)) * (W - m.l - m.r);
-    const y = v => m.t + (rg.hi - v) / (rg.hi - rg.lo) * (H - m.t - m.b);
-    let svg = '<svg viewBox="0 0 ' + W + ' ' + H + '" aria-hidden="true">' + yAxis(W, m, y, rg) + '<g class="axis">';
-    const evF = labelEvery(n, W - m.l - m.r);
-    rows.forEach((r, i) => { if (i % evF === 0) svg += '<text x="' + x(i) + '" y="' + (H - 4) + '" text-anchor="middle">' + monthShort(r.month) + '</text>'; });
-    svg += '</g>';
-    if (cushion != null) {
-      svg += '<line class="cushion" x1="' + m.l + '" x2="' + (W - m.r) + '" y1="' + y(cushion) + '" y2="' + y(cushion) + '"/>';
-      svg += '<text class="label" x="' + (W - m.r) + '" y="' + (y(cushion) - 5) + '" text-anchor="end">Cushion</text>';
-    }
-    const pts = rows.map((r, i) => x(i).toFixed(1) + ',' + y(r.min).toFixed(1));
-    svg += '<polyline class="spent" points="' + pts.join(' ') + '"/>';
-    rows.forEach((r, i) => { if (cushion != null && r.min < cushion) svg += '<circle class="below" cx="' + x(i) + '" cy="' + y(r.min) + '" r="4"/>'; });
-    svg += '<line class="cross" id="fcCross" y1="' + m.t + '" y2="' + (H - m.b) + '" visibility="hidden"/></svg>';
-    el.innerHTML = svg;
-    const cross = el.querySelector('#fcCross');
-    hover(el, W, n, x, i => {
-      const r = rows[i];
-      const flag = cushion != null && r.min < cushion ? '<br><span style="color:var(--critical)">▲ Below cushion</span>' : '';
-      return '<b>' + monthName(r.month) + '</b><br>Lowest ' + money(r.min, cur) + ' on ' + dateShort(r.minDate).slice(0, -5) + '<br>Month end ' + money(r.end, cur) + flag;
-    }, i => { if (i < 0) cross.setAttribute('visibility', 'hidden'); else { cross.setAttribute('x1', x(i)); cross.setAttribute('x2', x(i)); cross.setAttribute('visibility', 'visible'); } });
-    $('#fcTable').innerHTML = '<table><tr><th>Month</th><th>Lowest</th><th>Month end</th></tr>' + rows.map(r =>
-      '<tr><td>' + monthShort(r.month) + '</td><td' + (cushion != null && r.min < cushion ? ' style="color:var(--critical)"' : '') + '>' + money0(r.min) + '</td><td>' + money0(r.end) + '</td></tr>').join('') + '</table>';
-  }
-
-  function renderCashflowChart(p) {
-    const el = $('#cfChart');
-    const W = el.clientWidth || 340, H = el.clientHeight || 190;
-    const m = { t: 10, r: 8, b: 22, l: 46 };
-    const rows = p.months;
-    const rg = niceRange(0, Math.max.apply(null, rows.map(r => Math.max(r.in, r.out)).concat([1])));
-    const n = rows.length;
-    const slot = (W - m.l - m.r) / n;
-    const bw = Math.max(2, Math.min(10, slot / 2 - 2));
-    const xc = i => m.l + slot * (i + 0.5);
-    const y = v => m.t + (rg.hi - v) / (rg.hi - rg.lo) * (H - m.t - m.b);
-    const bar = (cls, x0, v) => { const h = Math.max(0, y(0) - y(v)); if (h < 0.5) return ''; const r = Math.min(3, bw / 2, h);
-      return '<path class="' + cls + '" d="M' + x0 + ',' + y(0) + 'V' + (y(v) + r) + 'Q' + x0 + ',' + y(v) + ' ' + (x0 + r) + ',' + y(v) + 'H' + (x0 + bw - r) + 'Q' + (x0 + bw) + ',' + y(v) + ' ' + (x0 + bw) + ',' + (y(v) + r) + 'V' + y(0) + 'Z"/>'; };
-    let svg = '<svg viewBox="0 0 ' + W + ' ' + H + '" aria-hidden="true">' + yAxis(W, m, y, rg) + '<g class="axis">';
-    const evC = labelEvery(n, W - m.l - m.r);
-    rows.forEach((r, i) => { if (i % evC === 0) svg += '<text x="' + xc(i) + '" y="' + (H - 4) + '" text-anchor="middle">' + monthShort(r.month) + '</text>'; });
-    svg += '</g>';
-    rows.forEach((r, i) => { svg += bar('bar-in', xc(i) - bw - 1, r.in) + bar('bar-out', xc(i) + 1, r.out); });
-    svg += '<rect id="cfHi" y="' + m.t + '" height="' + (H - m.t - m.b) + '" width="' + slot + '" fill="currentColor" opacity="0.06" visibility="hidden"/></svg>';
-    el.innerHTML = svg;
-    const hi = el.querySelector('#cfHi');
-    hover(el, W, n, xc, i => {
-      const r = rows[i];
-      return '<b>' + monthName(r.month) + '</b><br>Money in ' + money0(r.in) + '<br>Money out ' + money0(r.out) +
-        '<br><span style="color:var(--muted)">planned ' + money0(r.planned) + ' · day-to-day ' + money0(r.variable) + '</span><br>Net ' + money0(r.in - r.out) + ' CHF';
-    }, i => { if (i < 0) hi.setAttribute('visibility', 'hidden'); else { hi.setAttribute('x', xc(i) - slot / 2); hi.setAttribute('visibility', 'visible'); } });
   }
 
   // Mark paid / skip
@@ -1145,26 +1050,69 @@
 
 
 
-  // ---------- Monthly plan ----------
-  let mpAll = false;
-  function renderMonthlyPlan(M) {
+  // ---------- Money left over (monthly plan) ----------
+  let mpAll = false, mpView = 'budget';
+  function renderMonthlyPlan(M, B) {
     if (!M) { $('#mpRows').innerHTML = ''; return; }
     $('#editSavings').textContent = 'Savings ' + money0(M.savingsTarget) + '/month ✎';
-    $('#mpIntro').textContent = 'Income − planned payments − day-to-day budget − set aside for funds and goals − savings. Transfers between your own accounts are left out; they do not change the total.';
+    $('#mpIntro').textContent = 'Each month: income − planned payments − spending − set aside for funds and goals − savings. Transfers between your own accounts don\'t count. All in CHF.';
     $('#mpStart').innerHTML = '<span>Free money now</span><span class="num' + (M.start < 0 ? ' neg' : '') + '">' + money(M.start, 'CHF') + '</span>';
-    $('#mpStart').title = 'All accounts in CHF (card and overdraft debt included as minus) minus what is set aside in funds and goals';
+    $('#mpPaceNote').textContent = 'Spending: "following your budget" uses your category budgets (minus what is already planned in each). "Your real pace" uses what you really spend outside planned payments: ' +
+      (M.paceMethod === 'average' ? 'your average of the last ' + M.paceMonths.length + ' full month' + (M.paceMonths.length > 1 ? 's' : '') + '.' :
+       M.paceMethod === 'thisMonth' ? 'this month so far (' + M.paceDays + ' days of records), so it is rough until you have a full month.' :
+       'not enough records yet, so for now it equals your budget.');
+    renderMpChart(M);
+    $$('#mpView button').forEach(b => b.classList.toggle('active', b.dataset.v === mpView));
+    const pace = mpView === 'pace';
     const rows = mpAll ? M.rows : M.rows.slice(0, 12);
     $('#mpRows').innerHTML = '<div class="mp-head"><span>Month</span><span>Left</span><span>Free at month end</span></div>' + rows.map((r, i) => {
       const label = i === 0 ? 'Rest of ' + monthName(r.month).split(' ')[0] : monthName(r.month);
+      const left = pace ? r.leftPace : r.left, free = pace ? r.freePace : r.free, spend = pace ? r.pace : r.budget;
       return '<div class="mp-row" data-mp="' + i + '"><div class="mp-top"><span class="mp-month">' + label + '</span>' +
-        '<span class="mp-left' + (r.left < 0 ? ' neg' : '') + '">' + (r.left < 0 ? '▼ ' : '+') + money0(Math.abs(r.left)) + '</span>' +
-        '<span class="mp-free' + (r.free < 0 ? ' neg' : '') + '">' + money0(r.free) + '</span></div>' +
+        '<span class="mp-left' + (left < 0 ? ' neg' : '') + '">' + (left < 0 ? '▼ ' : '+') + money0(Math.abs(left)) + '</span>' +
+        '<span class="mp-free' + (free < 0 ? ' neg' : '') + '">' + money0(free) + '</span></div>' +
         '<div class="mp-lines" hidden>' +
-        kvLine('Income expected', r.income, '+') + kvLine('Planned payments', r.planned, '−') + kvLine('Day-to-day budget' + (i === 0 ? ' (rest of month)' : ''), r.dayToDay, '−') +
+        kvLine('Income expected', r.income, '+') + kvLine('Planned payments', r.planned, '−') +
+        kvLine((pace ? 'Spending at your pace' : 'Spending following budget') + (i === 0 ? ' (rest of month)' : ''), spend, '−') +
         (r.setAside ? kvLine('Set aside for funds and goals', r.setAside, '−') : '') + (r.fromFunds ? kvLine('Paid from funds', r.fromFunds, '+') : '') +
-        kvLine('Savings', r.savings, '−') + '<div class="kv total"><span>Left</span><span class="num">' + money(r.left, 'CHF') + '</span></div></div></div>';
+        kvLine('Savings', r.savings, '−') + '<div class="kv total"><span>Left</span><span class="num">' + money(left, 'CHF') + '</span></div>' +
+        '<div class="kv"><span class="muted">' + (pace ? 'Following budget' : 'At your real pace') + ' it would be</span><span class="num muted">' + money(pace ? r.left : r.leftPace) + '</span></div></div></div>';
     }).join('');
     $('#mpMore').hidden = mpAll || M.rows.length <= 12;
+    if (B) $('#mpCats').innerHTML = '<p class="small">' + monthName(B.month) + ' (pace: per month)</p><table><tr><th>Category</th><th>Budget</th><th>Planned</th><th>Budget left</th><th>Pace</th></tr>' +
+      B.perCategory.filter(v => v.budget > 0 || v.planned > 0 || v.pace > 0).map(v => '<tr><td>' + esc(v.category) + '</td><td>' + money0(v.budget) + '</td><td>' + money0(v.planned) + '</td><td>' + money0(v.budgetLeft) + '</td><td' + (v.pace > v.budgetLeft + 0.5 ? ' style="color:var(--critical)"' : '') + '>' + money0(v.pace) + (v.pace > v.budgetLeft + 0.5 ? ' ▲' : '') + '</td></tr>').join('') +
+      '<tr><th>Total</th><th></th><th></th><th>' + money0(B.monthlyBudget) + '</th><th>' + money0(B.monthlyPace) + '</th></tr></table>' +
+      '<p class="small">"Budget left" = budget minus what is planned in that category that month (never below 0). "Pace" = what you really spend in that category outside planned payments. ▲ = above budget.</p>';
+  }
+  function renderMpChart(M) {
+    const el = $('#mpChart');
+    const W = el.clientWidth || 340, H = el.clientHeight || 190;
+    const m = { t: 14, r: 12, b: 22, l: 46 };
+    const pts = [{ month: 'now', b: M.start, p: M.start }].concat(M.rows.map(r => ({ month: r.month, b: r.free, p: r.freePace })));
+    const n = pts.length;
+    const all = pts.map(x => x.b).concat(pts.map(x => x.p), [0]);
+    const rg = niceRange(Math.min.apply(null, all), Math.max.apply(null, all));
+    const x = i => m.l + i / (n - 1) * (W - m.l - m.r);
+    const y = v => m.t + (rg.hi - v) / (rg.hi - rg.lo) * (H - m.t - m.b);
+    let svg = '<svg viewBox="0 0 ' + W + ' ' + H + '" aria-hidden="true">' + yAxis(W, m, y, rg) + '<g class="axis">';
+    const ev = labelEvery(n, W - m.l - m.r);
+    pts.forEach((p, i) => { if (i % ev === 0) svg += '<text x="' + x(i) + '" y="' + (H - 4) + '" text-anchor="middle">' + (i === 0 ? 'Now' : monthShort(p.month)) + '</text>'; });
+    svg += '</g><line class="zero" x1="' + m.l + '" x2="' + (W - m.r) + '" y1="' + y(0) + '" y2="' + y(0) + '"/>';
+    svg += '<polyline class="line-pace" points="' + pts.map((p, i) => x(i).toFixed(1) + ',' + y(p.p).toFixed(1)).join(' ') + '"/>';
+    svg += '<polyline class="line-budget" points="' + pts.map((p, i) => x(i).toFixed(1) + ',' + y(p.b).toFixed(1)).join(' ') + '"/>';
+    svg += '<line class="cross" id="mpCross" y1="' + m.t + '" y2="' + (H - m.b) + '" visibility="hidden"/>';
+    svg += '<circle class="dot-b" id="mpDotB" r="4" visibility="hidden"/><circle class="dot-p" id="mpDotP" r="4" visibility="hidden"/></svg>';
+    el.innerHTML = svg;
+    const cross = el.querySelector('#mpCross'), db = el.querySelector('#mpDotB'), dp = el.querySelector('#mpDotP');
+    hover(el, W, n, x, i => {
+      const p = pts[i];
+      return '<b>' + (i === 0 ? 'Now' : 'End of ' + monthName(p.month)) + '</b><br>Following budget ' + money(p.b, 'CHF') + '<br>At your pace ' + money(p.p, 'CHF');
+    }, i => {
+      [cross, db, dp].forEach(e => e.setAttribute('visibility', i < 0 ? 'hidden' : 'visible'));
+      if (i < 0) return;
+      cross.setAttribute('x1', x(i)); cross.setAttribute('x2', x(i));
+      db.setAttribute('cx', x(i)); db.setAttribute('cy', y(pts[i].b)); dp.setAttribute('cx', x(i)); dp.setAttribute('cy', y(pts[i].p));
+    });
   }
   function kvLine(label, v, sign) { return '<div class="kv"><span>' + sign + ' ' + esc(label) + '</span><span class="num">' + money(v) + '</span></div>'; }
   function openSavingsSheet() {
@@ -1334,14 +1282,14 @@
     $('#sheetDelete').addEventListener('click', onSheetDelete);
     $('#duplicateBtn').addEventListener('click', duplicateEntry);
     $('#categories').addEventListener('click', e => { const c = e.target.closest('[data-catname]'); if (c) openSheet('catdetail', c.dataset.catname); });
-    $('#fcAccounts').addEventListener('click', e => { const c = e.target.closest('[data-fc]'); if (!c) return; state.fcAccount = c.dataset.fc; renderPlan(); });
     $('#upcoming').addEventListener('click', e => {
       const p = e.target.closest('[data-paid]'), k = e.target.closest('[data-skip]');
       if (p) openSheet('paid', state.plan.upcoming[Number(p.dataset.paid)]);
       if (k) skipUpcoming(state.plan.upcoming[Number(k.dataset.skip)]);
     });
     $('#editSavings').addEventListener('click', openSavingsSheet);
-    $('#mpMore').addEventListener('click', () => { mpAll = true; renderMonthlyPlan(state.plan.monthly); });
+    $('#mpMore').addEventListener('click', () => { mpAll = true; renderMonthlyPlan(state.plan.monthly, state.plan.budget); });
+    $('#mpView').addEventListener('click', e => { const b = e.target.closest('button'); if (!b) return; mpView = b.dataset.v; renderMonthlyPlan(state.plan.monthly, state.plan.budget); });
     $('#mpRows').addEventListener('click', e => { const r = e.target.closest('.mp-row'); if (!r) return; const l = r.querySelector('.mp-lines'); l.hidden = !l.hidden; });
     $('#addEnvelope').addEventListener('click', () => { if (state.plan) openSheet('envelope', null); });
     $('#envList').addEventListener('click', ev => {

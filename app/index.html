@@ -170,29 +170,17 @@
 
   <!-- PLAN -->
   <section id="view-plan" class="view" hidden>
-    <div id="gapCard" class="card"></div>
-
     <div class="card">
-      <div class="card-head"><h2>Monthly plan</h2><button class="link-btn" id="editSavings">Savings goal ✎</button></div>
+      <div class="card-head"><h2>Money left over</h2><button class="link-btn" id="editSavings">Savings goal ✎</button></div>
       <p class="muted small" id="mpIntro"></p>
       <div id="mpStart" class="mp-start"></div>
+      <div class="legend"><span><i class="sw sw-in"></i>Following your budget</span><span><i class="sw sw-out sw-dash"></i>At your real pace</span></div>
+      <div id="mpChart" class="chart" role="img" aria-label="Free money at the end of each month, following your budget and at your real spending pace"></div>
+      <p class="muted small" id="mpPaceNote"></p>
+      <div class="seg2 mp-switch" id="mpView"><button type="button" data-v="budget" class="active">Following budget</button><button type="button" data-v="pace">Your real pace</button></div>
       <div id="mpRows"></div>
       <button class="btn-secondary" id="mpMore" hidden>Show all 24 months</button>
-    </div>
-
-    <div class="card">
-      <div class="card-head"><h2>Lowest balance each month</h2><span class="muted small" id="fcUnit">CHF</span></div>
-      <div id="fcAccounts" class="chips small-chips scroll-chips" role="radiogroup" aria-label="Account"></div>
-      <div id="fcChart" class="chart" role="img" aria-label="Forecast of the lowest balance in each month"></div>
-      <details class="table-view"><summary>Show as table</summary><div id="fcTable"></div></details>
-    </div>
-
-    <div class="card">
-      <div class="card-head"><h2>Money in and out per month</h2><span class="muted small">CHF</span></div>
-      <div class="legend"><span><i class="sw sw-in"></i>Money in</span><span><i class="sw sw-out"></i>Money out</span></div>
-      <div id="cfChart" class="chart" role="img" aria-label="Money in and out per month"></div>
-      <p class="muted small" id="varNote"></p>
-      <details class="table-view"><summary>How day-to-day spending is estimated</summary><div id="varBreakdown"></div></details>
+      <details class="table-view"><summary>Budget and pace by category</summary><div id="mpCats"></div></details>
     </div>
 
     <div class="card">
@@ -241,7 +229,7 @@
       <p id="queueInfo" class="muted small">Nothing waiting.</p>
       <button class="btn-secondary" id="syncNow">Upload now</button>
     </div>
-    <p class="muted small center">Finances app · v7</p>
+    <p class="muted small center">Finances app · v8</p>
   </section>
 </main>
 
