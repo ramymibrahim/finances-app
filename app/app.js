@@ -63,7 +63,7 @@
     deleteEntry: 'Deleting…', saveAccount: 'Saving account…', deleteAccount: 'Deleting…',
     saveCategory: 'Saving…', deleteCategory: 'Deleting…', saveRecurring: 'Saving and updating the forecast…',
     deleteRecurring: 'Deleting…', markPaid: 'Recording the payment…', skipPayment: 'Skipping…',
-    reconcile: 'Adding the correction…', saveEnvelope: 'Saving…', deleteEnvelope: 'Deleting…', moveEnvelope: 'Updating…',
+    reconcile: 'Adding the correction…', saveEnvelope: 'Saving…', saveSavingsTarget: 'Saving and updating the plan…', deleteEnvelope: 'Deleting…', moveEnvelope: 'Updating…',
   };
   let busyCount = 0, loadCount = 0, busyTimer = null;
   function busyStart(text) {
@@ -723,6 +723,7 @@
     if (mode === 'recurring') return saveRecurringSheet();
     if (mode === 'paid') return savePaidSheet();
     if (mode === 'envelope') return saveEnvelopeSheet();
+    if (mode === 'savings') return saveSavingsSheet();
     if (mode === 'catdetail') { $('#sheet').close(); return; }
     const errEl = $('#sheetError'); errEl.hidden = true;
     const btn = $('#sheetSave'); btn.disabled = true;
@@ -793,15 +794,17 @@
       (g.suggestFrom ? ' You could plan a transfer from ' + esc(g.suggestFrom) + '.' : ' Plan a transfer into this account, or reduce what is paid from it.') + '</div></div></div>').join('')
       : '<div class="gap"><div class="gap-ic okay" aria-hidden="true">✓</div><div><div class="gap-title">No gaps found</div><div class="gap-sub">Every account stays above its safety cushion.</div></div></div>');
 
+    renderMonthlyPlan(p.monthly);
+
     // Account chips
     const chips = [{ k: 'all', label: 'All (CHF)' }].concat(p.accounts.map(a => ({ k: a.name, label: a.name })));
     if (!chips.some(c => c.k === state.fcAccount)) state.fcAccount = 'all';
     $('#fcAccounts').innerHTML = chips.map(c => '<button type="button" class="chip' + (c.k === state.fcAccount ? ' active' : '') + '" data-fc="' + esc(c.k) + '">' + esc(c.label) + '</button>').join('');
     renderForecastChart(p);
     renderCashflowChart(p);
-    $('#varBreakdown').innerHTML = '<table><tr><th>Category</th><th>Per month</th><th>Charged to</th></tr>' +
-      p.variable.perCategory.filter(v => v.monthly > 0).map(v => '<tr><td>' + esc(v.category) + '</td><td>' + money0(v.monthly) + '</td><td>' + esc(v.account) + '</td></tr>').join('') + '</table>' +
-      '<p class="small">Per category: your ' + (p.variable.method === 'budget' ? 'monthly budget' : '3-month average') + ' minus what is already planned in that category (yearly items count 1/12 a month). Charged to the account you use most for that category; if that is a credit card, add a planned transfer that pays the card\'s full balance.</p>';
+    $('#varBreakdown').innerHTML = '<p class="small">' + monthName(p.variable.month) + ':</p><table><tr><th>Category</th><th>' + (p.variable.method === 'budget' ? 'Budget' : 'Average') + '</th><th>Planned</th><th>Day-to-day</th></tr>' +
+      p.variable.perCategory.filter(v => v.base > 0 || v.planned > 0).map(v => '<tr><td>' + esc(v.category) + '<br><span class="muted">' + esc(v.account) + '</span></td><td>' + money0(v.base) + '</td><td>' + money0(v.planned) + '</td><td>' + money0(v.monthly) + '</td></tr>').join('') + '</table>' +
+      '<p class="small">Each month, per category: your ' + (p.variable.method === 'budget' ? 'monthly budget' : '3-month average') + ' minus what is planned in that category in that month (never below 0). It is charged to the account you use most for that category; if that is a credit card, add a planned transfer that pays the card\'s full balance.</p>';
     $('#varNote').textContent = 'Money out includes planned items and expected day-to-day spending of about ' + money0(p.variable.monthlyCHF) + ' CHF a month, ' +
       (p.variable.method === 'budget' ? 'taken from your budgets (the app switches to your real 3-month average once it has 3 full months).' : 'based on your last 3 months.');
 
@@ -1141,6 +1144,45 @@
   }
 
 
+
+  // ---------- Monthly plan ----------
+  let mpAll = false;
+  function renderMonthlyPlan(M) {
+    if (!M) { $('#mpRows').innerHTML = ''; return; }
+    $('#editSavings').textContent = 'Savings ' + money0(M.savingsTarget) + '/month ✎';
+    $('#mpIntro').textContent = 'Income − planned payments − day-to-day budget − set aside for funds and goals − savings. Transfers between your own accounts are left out; they do not change the total.';
+    $('#mpStart').innerHTML = '<span>Free money now</span><span class="num' + (M.start < 0 ? ' neg' : '') + '">' + money(M.start, 'CHF') + '</span>';
+    $('#mpStart').title = 'All accounts in CHF (card and overdraft debt included as minus) minus what is set aside in funds and goals';
+    const rows = mpAll ? M.rows : M.rows.slice(0, 12);
+    $('#mpRows').innerHTML = '<div class="mp-head"><span>Month</span><span>Left</span><span>Free at month end</span></div>' + rows.map((r, i) => {
+      const label = i === 0 ? 'Rest of ' + monthName(r.month).split(' ')[0] : monthName(r.month);
+      return '<div class="mp-row" data-mp="' + i + '"><div class="mp-top"><span class="mp-month">' + label + '</span>' +
+        '<span class="mp-left' + (r.left < 0 ? ' neg' : '') + '">' + (r.left < 0 ? '▼ ' : '+') + money0(Math.abs(r.left)) + '</span>' +
+        '<span class="mp-free' + (r.free < 0 ? ' neg' : '') + '">' + money0(r.free) + '</span></div>' +
+        '<div class="mp-lines" hidden>' +
+        kvLine('Income expected', r.income, '+') + kvLine('Planned payments', r.planned, '−') + kvLine('Day-to-day budget' + (i === 0 ? ' (rest of month)' : ''), r.dayToDay, '−') +
+        (r.setAside ? kvLine('Set aside for funds and goals', r.setAside, '−') : '') + (r.fromFunds ? kvLine('Paid from funds', r.fromFunds, '+') : '') +
+        kvLine('Savings', r.savings, '−') + '<div class="kv total"><span>Left</span><span class="num">' + money(r.left, 'CHF') + '</span></div></div></div>';
+    }).join('');
+    $('#mpMore').hidden = mpAll || M.rows.length <= 12;
+  }
+  function kvLine(label, v, sign) { return '<div class="kv"><span>' + sign + ' ' + esc(label) + '</span><span class="num">' + money(v) + '</span></div>'; }
+  function openSavingsSheet() {
+    const M = state.plan && state.plan.monthly; if (!M) return;
+    sheetMode = { mode: 'savings', item: M };
+    $('#sheetError').hidden = true; $('#sheetDelete').hidden = true; $('#sheetSave').hidden = false; $('#sheetCancel').textContent = 'Cancel';
+    $('#sheetTitle').textContent = 'Monthly savings goal';
+    $('#sheetBody').innerHTML = '<p class="muted small">Kept aside every month in the Monthly plan. Saved in your sheet (Cash flow tab, "Monthly savings goal").</p>' +
+      field('CHF per month', '<input id="svAmount" inputmode="decimal" value="' + M.savingsTarget + '">');
+    $('#sheet').showModal();
+  }
+  async function saveSavingsSheet() {
+    const n = parseNum($('#svAmount').value);
+    if (!(n >= 0)) { $('#sheetError').textContent = 'Enter 0 or more.'; $('#sheetError').hidden = false; return; }
+    try { state.plan = await api('saveSavingsTarget', { amount: n }); store.set('plan', state.plan); $('#sheet').close(); toast('Saved ✓'); renderPlan(); }
+    catch (e) { $('#sheetError').textContent = e instanceof NetworkError ? 'This needs a connection.' : e.message; $('#sheetError').hidden = false; }
+  }
+
   // ---------- Sinking funds and goals ----------
   function renderEnvelopes(E) {
     if (!E) { $('#envList').innerHTML = ''; return; }
@@ -1298,6 +1340,9 @@
       if (p) openSheet('paid', state.plan.upcoming[Number(p.dataset.paid)]);
       if (k) skipUpcoming(state.plan.upcoming[Number(k.dataset.skip)]);
     });
+    $('#editSavings').addEventListener('click', openSavingsSheet);
+    $('#mpMore').addEventListener('click', () => { mpAll = true; renderMonthlyPlan(state.plan.monthly); });
+    $('#mpRows').addEventListener('click', e => { const r = e.target.closest('.mp-row'); if (!r) return; const l = r.querySelector('.mp-lines'); l.hidden = !l.hidden; });
     $('#addEnvelope').addEventListener('click', () => { if (state.plan) openSheet('envelope', null); });
     $('#envList').addEventListener('click', ev => {
       const sa = ev.target.closest('[data-setaside]');

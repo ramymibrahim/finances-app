@@ -53,7 +53,9 @@ function doPost(e) {
     categoryDetail: () => categoryDetail_(req.name, req.month),
     transferCosts: () => transferCosts_(),
     reconcileCheck: () => reconcile_(req.account, req.bankBalance, false),
+    reminderSync: () => reminderSync_(req.existing, req.days),
   };
+
   const writes = {
     addExpense:     () => addEntry_('expense', req.entry),
     addIncome:      () => addEntry_('income', req.entry),
@@ -72,6 +74,7 @@ function doPost(e) {
     saveEnvelope:   () => saveEnvelope_(req.envelope),
     deleteEnvelope: () => deleteEnvelope_(req.row, req.match),
     moveEnvelope:   () => moveEnvelope_(req.row, req.match, req.amount, req.reason),
+    saveSavingsTarget: () => saveSavingsTarget_(req.amount),
   };
   try {
     if (reads[req.action]) return out_({ ok: true, data: reads[req.action]() });
@@ -167,7 +170,7 @@ function logRows_(ss) {
     .map((r, i) => ({ row: i + 2, r, link: links[i][0] || r[12] }))
     .filter(x => x.r[0] instanceof Date && x.r[3] !== '')
     .map(x => ({
-      kind: 'expense', row: x.row, date: x.r[0], merchant: String(x.r[1]), item: String(x.r[2]),
+      kind: 'expense', row: x.row, date: dayOf_(x.r[0]), merchant: String(x.r[1]), item: String(x.r[2]),
       amount: num_(x.r[3]), currency: String(x.r[4] || 'CHF'), category: String(x.r[5]),
       note: String(x.r[6]), manualRate: x.r[7] === '' ? '' : num_(x.r[7]), chf: num_(x.r[9]),
       account: String(x.r[11]), receipt: receiptUrl_(x.link)
@@ -181,7 +184,7 @@ function incomeRows_(ss) {
     .map((r, i) => ({ row: i + 2, r }))
     .filter(x => x.r[0] instanceof Date && x.r[3] !== '')
     .map(x => ({
-      kind: 'income', row: x.row, date: x.r[0], source: String(x.r[1]), type: String(x.r[2]),
+      kind: 'income', row: x.row, date: dayOf_(x.r[0]), source: String(x.r[1]), type: String(x.r[2]),
       amount: num_(x.r[3]), currency: String(x.r[4] || 'CHF'), account: String(x.r[5]),
       note: String(x.r[6]), manualRate: x.r[7] === '' ? '' : num_(x.r[7]), chf: num_(x.r[9])
     }));
@@ -194,7 +197,7 @@ function transferRows_(ss) {
     .map((r, i) => ({ row: i + 2, r }))
     .filter(x => x.r[0] instanceof Date && x.r[3] !== '')
     .map(x => ({
-      kind: 'transfer', row: x.row, date: x.r[0], from: String(x.r[1]), to: String(x.r[2]),
+      kind: 'transfer', row: x.row, date: dayOf_(x.r[0]), from: String(x.r[1]), to: String(x.r[2]),
       amount: num_(x.r[3]), received: x.r[4] === '' ? '' : num_(x.r[4]), note: String(x.r[5]),
       currency: String(x.r[6] || 'CHF'), toCurrency: String(x.r[7] || 'CHF'),
       receivedUsed: num_(x.r[8]), chf: num_(x.r[9])
@@ -234,7 +237,7 @@ function summary_(month) {
 }
 
 function summaryFrom_(ss, month, s, log) {
-  const today = startOfDay_(new Date());
+  const today = dayOf_(new Date());
   const ym = parseMonth_(month) || { y: today.getFullYear(), m: today.getMonth() };
   const first = new Date(ym.y, ym.m, 1);
   const daysInMonth = new Date(ym.y, ym.m + 1, 0).getDate();
@@ -286,8 +289,8 @@ function summaryFrom_(ss, month, s, log) {
     });
 
   return {
-    month: Utilities.formatDate(first, TZ, 'yyyy-MM'),
-    monthLabel: Utilities.formatDate(first, TZ, 'MMMM yyyy'),
+    month: ymd_(first).slice(0, 7),
+    monthLabel: MONTHS_[first.getMonth()] + ' ' + first.getFullYear(),
     isCurrent, today: ymd_(today), daysInMonth,
     budgetTotal: round2_(budgetTotal), spentTotal: round2_(spentTotal), incomeTotal: round2_(incomeTotal),
     daysLeft, dailyAllowance,
@@ -376,7 +379,7 @@ function addEntry_(kind, e) {
 function checkRow_(sh, row, match) {
   if (!(row >= 2) || row > sh.getMaxRows()) throw new Error('Entry not found. Refresh and try again.');
   const v = sh.getRange(row, 1, 1, 4).getValues()[0];
-  const ok = v[0] instanceof Date && match && ymd_(v[0]) === match.date &&
+  const ok = v[0] instanceof Date && match && ymd_(dayOf_(v[0])) === match.date &&
              Math.abs(num_(v[3]) - Number(match.amount)) < 0.005;
   if (!ok) throw new Error('This entry was changed in the sheet. Refresh and try again.');
 }
@@ -571,8 +574,20 @@ function receiptsFolder_() {
 // ---------- Helpers ----------
 // Noon avoids any timezone shift moving the date to the day before.
 function date_(s) { const p = s.split('-').map(Number); return new Date(p[0], p[1] - 1, p[2], 12); }
+// All day calculations use the Zurich calendar day, whatever time zone the
+// Apps Script project is set to. dayOf_ turns any moment into that day
+// (as midnight in the script's own time zone, so getDate()/getMonth() work).
+function dayOf_(d) {
+  const s = Utilities.formatDate(d, TZ, 'yyyy-MM-dd');
+  return new Date(Number(s.slice(0, 4)), Number(s.slice(5, 7)) - 1, Number(s.slice(8, 10)));
+}
+// Only for days already made by dayOf_ (sheet values and "now" go through dayOf_ first).
 function startOfDay_(d) { return new Date(d.getFullYear(), d.getMonth(), d.getDate()); }
-function ymd_(d) { return Utilities.formatDate(d, TZ, 'yyyy-MM-dd'); }
+// For days made by dayOf_/addDays_/addMonths_ (not raw sheet values).
+function ymd_(d) { return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0'); }
+const MONTHS_ = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
+const DAYS_ = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+function longDay_(d) { return DAYS_[d.getDay()] + ' ' + d.getDate() + ' ' + MONTHS_[d.getMonth()].slice(0, 3) + ' ' + d.getFullYear(); }
 function parseMonth_(s) {
   if (!s || !/^\d{4}-\d{2}$/.test(s)) return null;
   return { y: Number(s.slice(0, 4)), m: Number(s.slice(5, 7)) - 1 };
@@ -592,13 +607,32 @@ function receiptUrl_(v) {
 // Planned tab: A First due, B Description, C Amount (minus = money in), D Currency,
 // E Category, F Repeats, G Pay from, H Status, I Note, J-M formulas,
 // N Last paid, O Ends on, P If weekend, Q To account
-const PLANNED = { sheet: 'Planned', inputs: [1, 2, 3, 4, 5, 6, 7, 8, 9, 14, 15, 16, 17], fStart: 10, fCount: 4 };
+const PLANNED = { sheet: 'Planned', inputs: [1, 2, 3, 4, 5, 6, 7, 8, 9, 14, 15, 16, 17, 18], fStart: 10, fCount: 4 };
 const REPEATS = { 'Once': 0, 'Monthly': 1, 'Every 2 months': 2, 'Quarterly': 3, 'Every 6 months': 6, 'Yearly': 12 };
 const WEEKEND = ['No change', 'Earlier', 'Later'];
 const FORECAST_MONTHS = 24;
 
 // Adds the new columns the first time the app runs on a sheet. Safe to run again.
 function ensureSchema_() {
+  ensureSchema2_();
+  ensureSchema3_();
+}
+
+// Column R in Planned: "Pay full balance" for transfers that pay off a card.
+function ensureSchema3_() {
+  const props = PropertiesService.getScriptProperties();
+  const flag = 'SCHEMA3_' + SHEET_ID;
+  if (props.getProperty(flag)) return;
+  const pl = ss_().getSheetByName('Planned');
+  if (pl.getMaxColumns() < 18) pl.insertColumnsAfter(pl.getMaxColumns(), 18 - pl.getMaxColumns());
+  if (pl.getRange(1, 18).getValue() !== 'Pay full balance') {
+    try { pl.getRange(1, 17).copyTo(pl.getRange(1, 18), SpreadsheetApp.CopyPasteType.PASTE_FORMAT, false); } catch (err) { /* keep default format */ }
+    pl.getRange(1, 18).setValue('Pay full balance');
+  }
+  props.setProperty(flag, '1');
+}
+
+function ensureSchema2_() {
   const props = PropertiesService.getScriptProperties();
   const flag = 'SCHEMA2_' + SHEET_ID;
   if (props.getProperty(flag)) return;
@@ -618,7 +652,6 @@ function ensureSchema_() {
         const v = pl.getRange(2, 1, last - 1, 8).getValues();
         const lp = v.map(r => [r[0] instanceof Date && String(r[7]) === 'Paid' ? r[0] : '']);
         pl.getRange(2, 14, lp.length, 1).setValues(lp);
-        pl.getRange(2, 14, lp.length, 2).setNumberFormat('yyyy-mm-dd');
       }
       addSalaryRow_(ss, pl);
     }
@@ -641,25 +674,26 @@ function addSalaryRow_(ss, pl) {
   const rows = plannedRows_(ss);
   if (rows.some(r => r.amount < 0 && r.repeats === 'Monthly')) return;
   const row = firstEmptyRow_(pl, [1, 3], PLANNED.fStart, PLANNED.fCount);
-  pl.getRange(row, 1, 1, 9).setValues([[salary.date, 'Salary ' + salary.source, -salary.amount, salary.currency,
+  pl.getRange(row, 1, 1, 9).setValues([[date_(ymd_(salary.date)), 'Salary ' + salary.source, -salary.amount, salary.currency,
     'Salary', 'Monthly', salary.account, 'Planned', '']]);
-  pl.getRange(row, 14, 1, 3).setValues([[salary.date, '', 'Earlier']]);
+  pl.getRange(row, 14, 1, 3).setValues([[date_(ymd_(salary.date)), '', 'Earlier']]);
 }
 
 function plannedRows_(ss) {
   const sh = ss.getSheetByName('Planned');
   const last = sh.getLastRow();
   if (last < 2) return [];
-  const v = sh.getRange(2, 1, last - 1, 17).getValues();
+  const v = sh.getRange(2, 1, last - 1, 18).getValues();
   return v.map((r, i) => ({ r, row: i + 2 }))
     .filter(x => x.r[0] instanceof Date && x.r[2] !== '' && x.r[1] !== '')
     .map(x => ({
-      row: x.row, first: x.r[0], description: String(x.r[1]), amount: num_(x.r[2]),
+      row: x.row, first: dayOf_(x.r[0]), description: String(x.r[1]), amount: num_(x.r[2]),
       currency: String(x.r[3] || 'CHF'), category: String(x.r[4]), repeats: REPEATS[x.r[5]] !== undefined ? String(x.r[5]) : 'Once',
       account: String(x.r[6]), status: String(x.r[7]), note: String(x.r[8]),
-      lastPaid: x.r[13] instanceof Date ? x.r[13] : null, endsOn: x.r[14] instanceof Date ? x.r[14] : null,
+      lastPaid: x.r[13] instanceof Date ? dayOf_(x.r[13]) : null, endsOn: x.r[14] instanceof Date ? dayOf_(x.r[14]) : null,
       weekend: WEEKEND.indexOf(String(x.r[15])) >= 0 ? String(x.r[15]) : 'No change',
-      toAccount: String(x.r[16] || '')
+      toAccount: String(x.r[16] || ''),
+      fullBalance: !!x.r[16] && (x.r[17] === true || /^(yes|true|1)$/i.test(String(x.r[17]).trim()))
     }));
 }
 
@@ -689,7 +723,8 @@ function occurrences_(p, from, to) {
 // Payments still open: not yet marked paid, from up to 90 days ago until `to`.
 function openOccurrences_(p, today, to) {
   if (p.status === 'Paid' && p.repeats === 'Once') return [];
-  if (p.status === 'Skipped' || p.status === 'Stopped') return [];
+  // Cancelled (your sheet's own status) and Stopped items are left out of the forecast.
+  if (p.status === 'Skipped' || p.status === 'Stopped' || p.status === 'Cancelled') return [];
   const lookBack = addDays_(today, -90);
   const after = p.lastPaid ? addDays_(startOfDay_(p.lastPaid), 1) : lookBack;
   const from = after > lookBack ? after : lookBack;
@@ -698,7 +733,7 @@ function openOccurrences_(p, today, to) {
 
 function plan_() {
   const ss = ss_();
-  const today = startOfDay_(new Date());
+  const today = dayOf_(new Date());
   const end = addMonths_(new Date(today.getFullYear(), today.getMonth(), 1), FORECAST_MONTHS);
   end.setDate(end.getDate() - 1);
   const s = settings_(ss);
@@ -718,7 +753,9 @@ function plan_() {
       const when = o.date < today ? today : o.date;
       const chf = Math.abs(p.amount) * rate(p.currency);
       const toAcc = a => accBy[a] ? chf / rate(accBy[a].currency) : 0;
-      if (kind === 'transfer') {
+      if (kind === 'transfer' && p.fullBalance) {
+        events.push({ date: when, settle: true, from: p.account, to: p.toAccount, key: p.row + '|' + ymd_(o.due) });
+      } else if (kind === 'transfer') {
         events.push({ date: when, account: p.account, amount: -toAcc(p.account), chf: 0 });
         events.push({ date: when, account: p.toAccount, amount: toAcc(p.toAccount), chf: 0 });
       } else {
@@ -726,21 +763,34 @@ function plan_() {
         events.push({ date: when, account: p.account, amount: sign * toAcc(p.account), chf: sign * chf, kind });
       }
       if (o.date <= in45) {
-        upcoming.push({ row: p.row, description: p.description, kind, due: ymd_(o.due), date: ymd_(o.date),
+        upcoming.push({ row: p.row, description: p.description, kind, due: ymd_(o.due), date: ymd_(o.date), fullBalance: p.fullBalance,
           overdue: o.date < today, amount: Math.abs(p.amount), currency: p.currency, category: p.category,
           account: p.account, toAccount: p.toAccount, chf: round2_(chf), repeats: p.repeats });
       }
     });
   });
 
-  // ---- Day-to-day spending not covered by planned items ----
+  // ---- Day-to-day spending: per category and month, the budget (or 3-month
+  // average) minus what is planned in that category in that month ----
   const variable = variableSpending_(ss, s, planned, rate, accounts);
+  const monthKeys = [];
+  for (let i = 0; i < FORECAST_MONTHS; i++) monthKeys.push(ymd_(addMonths_(new Date(today.getFullYear(), today.getMonth(), 1), i)).slice(0, 7));
+  const plannedCat = {};   // month -> category -> CHF planned (paid or not)
+  planned.forEach(p => {
+    if (kindOfPlanned_(p) !== 'expense' || ['Cancelled', 'Stopped', 'Skipped'].indexOf(p.status) >= 0) return;
+    occurrences_(p, new Date(today.getFullYear(), today.getMonth(), 1), end).forEach(due => {
+      const mk = ymd_(shiftWeekend_(due, p.weekend)).slice(0, 7);
+      const m = plannedCat[mk] || (plannedCat[mk] = {});
+      m[p.category] = (m[p.category] || 0) + p.amount * rate(p.currency);
+    });
+  });
+  const ddMonth = (mk, v) => Math.max(0, v.base - ((plannedCat[mk] || {})[v.category] || 0));
   variable.perCategory.forEach(v => {
-    if (!(v.monthly > 0) || !accBy[v.account]) return;
+    if (!accBy[v.account]) return;
     for (let d = addDays_(today, 1); d <= end; d = addDays_(d, 1)) {
       const dim = new Date(d.getFullYear(), d.getMonth() + 1, 0).getDate();
-      const chf = v.monthly / dim;
-      events.push({ date: d, account: v.account, amount: -chf / rate(accBy[v.account].currency), chf: -chf, kind: 'variable' });
+      const chf = ddMonth(ymd_(d).slice(0, 7), v) / dim;
+      if (chf > 0) events.push({ date: d, account: v.account, amount: -chf / rate(accBy[v.account].currency), chf: -chf, kind: 'variable' });
     }
   });
 
@@ -751,6 +801,7 @@ function plan_() {
   const months = [];
   const accMonths = {}; accounts.forEach(a => { accMonths[a.name] = []; });
   const breach = {};
+  const settled = {};
   let cur = null;
   for (let d = new Date(today); d <= end; d = addDays_(d, 1)) {
     const key = ymd_(d);
@@ -760,7 +811,17 @@ function plan_() {
       months.push(cur);
       accounts.forEach(a => accMonths[a.name].push({ month: mk, min: Infinity, minDate: key, end: 0 }));
     }
-    (byDay[key] || []).forEach(e => {
+    const todays = (byDay[key] || []).slice().sort((a, b) => (a.settle ? 1 : 0) - (b.settle ? 1 : 0));
+    todays.forEach(e => {
+      if (e.settle) {
+        // Pay off what the card owes at that moment.
+        if (bal[e.to] === undefined || bal[e.from] === undefined) return;
+        const owed = Math.max(0, -bal[e.to]);
+        const fromAmt = owed * accBy[e.to].rate / accBy[e.from].rate;
+        bal[e.to] += owed; bal[e.from] -= fromAmt;
+        settled[e.key] = { amount: fromAmt, currency: accBy[e.from].currency };
+        return;
+      }
       if (bal[e.account] === undefined) return;
       bal[e.account] += e.amount;
       if (e.chf > 0) cur.in += e.chf;
@@ -799,6 +860,13 @@ function plan_() {
       suggestFrom: from ? from.name : '' };
   }).sort((x, y) => x.firstDate < y.firstDate ? -1 : 1);
 
+  upcoming.forEach(u => {
+    if (!u.fullBalance) return;
+    const st = settled[u.row + '|' + u.due];
+    const from = accBy[u.account];
+    u.amount = round2_(st ? st.amount : 0); u.currency = st ? st.currency : (from ? from.currency : u.currency);
+    u.chf = round2_(u.amount * (from ? from.rate : 1)); u.estimated = true;
+  });
   upcoming.sort((a, b) => a.date < b.date ? -1 : a.date > b.date ? 1 : a.description < b.description ? -1 : 1);
   const r2 = m => ({ month: m.month, in: round2_(m.in), out: round2_(m.out), planned: round2_(m.planned),
     variable: round2_(m.variable), min: round2_(m.min), minDate: m.minDate, end: round2_(m.end) });
@@ -812,13 +880,16 @@ function plan_() {
     })),
     totalCushionCHF: round2_(accounts.reduce((t, a) => t + Math.max(0, cushionOf_(a) || 0) * a.rate, 0)),
     gaps, upcoming,
-    variable: { method: variable.method, monthlyCHF: round2_(variable.perCategory.reduce((t, v) => t + v.monthly, 0)),
-      perCategory: variable.perCategory.map(v => ({ category: v.category, monthly: round2_(v.monthly), account: v.account })) },
+    variable: { method: variable.method, month: monthKeys[1],
+      monthlyCHF: round2_(variable.perCategory.reduce((t, v) => t + ddMonth(monthKeys[1], v), 0)),
+      perCategory: variable.perCategory.map(v => ({ category: v.category, base: round2_(v.base),
+        planned: round2_((plannedCat[monthKeys[1]] || {})[v.category] || 0), monthly: round2_(ddMonth(monthKeys[1], v)), account: v.account })) },
+    monthly: monthlyPlan_(ss, { today, end, monthKeys, planned, rate, variable, ddMonth, accounts }),
     recurring: planned.map(p => ({
       row: p.row, first: ymd_(p.first), description: p.description, amount: p.amount, currency: p.currency,
       category: p.category, repeats: p.repeats, account: p.account, status: p.status, note: p.note,
       lastPaid: p.lastPaid ? ymd_(p.lastPaid) : '', endsOn: p.endsOn ? ymd_(p.endsOn) : '',
-      weekend: p.weekend, toAccount: p.toAccount, kind: kindOfPlanned_(p),
+      weekend: p.weekend, toAccount: p.toAccount, kind: kindOfPlanned_(p), fullBalance: p.fullBalance,
       next: (openOccurrences_(p, today, addMonths_(today, 25))[0] || {}).date ? ymd_(openOccurrences_(p, today, addMonths_(today, 25))[0].date) : ''
     })),
     repeatsOptions: Object.keys(REPEATS), weekendOptions: WEEKEND,
@@ -835,21 +906,13 @@ function cushionOf_(a) {
 // Expected day-to-day spending per category (CHF a month), on top of planned items.
 // Uses the average of the last 3 full months once you have them, otherwise your budgets.
 function variableSpending_(ss, s, planned, rate, accounts) {
-  const today = startOfDay_(new Date());
+  const today = dayOf_(new Date());
   const log = logRows_(ss);
   const firstMonth = new Date(today.getFullYear(), today.getMonth() - 3, 1);
   const thisMonth = new Date(today.getFullYear(), today.getMonth(), 1);
   const oldest = log.reduce((m, e) => e.date < m ? e.date : m, today);
   const method = oldest <= firstMonth ? 'average' : 'budget';
 
-  // Planned amounts per category, as a monthly average (CHF).
-  const plannedMonthly = {};
-  planned.forEach(p => {
-    if (kindOfPlanned_(p) !== 'expense') return;
-    const step = REPEATS[p.repeats];
-    if (!step) return;
-    plannedMonthly[p.category] = (plannedMonthly[p.category] || 0) + p.amount * rate(p.currency) / step;
-  });
   // Usual account per category: the one used most often.
   const useCount = {};
   log.forEach(e => { const k = e.category + '|' + e.account; useCount[k] = (useCount[k] || 0) + 1; });
@@ -867,7 +930,7 @@ function variableSpending_(ss, s, planned, rate, accounts) {
     } else {
       monthly = c.budget;
     }
-    return { category: c.name, monthly: Math.max(0, monthly - (plannedMonthly[c.name] || 0)), account: usualAccount(c.name) };
+    return { category: c.name, base: Math.max(0, monthly), account: usualAccount(c.name) };
   });
   return { method, perCategory };
 }
@@ -878,10 +941,11 @@ function saveRecurring_(it) {
   const desc = String(it.description || '').trim();
   if (!desc) throw new Error('Enter a description');
   if (!/^\d{4}-\d{2}-\d{2}$/.test(it.first || '')) throw new Error('Choose the first due date');
-  const amount = Number(it.amount);
-  if (!(amount > 0)) throw new Error('Amount must be more than 0');
-  if (REPEATS[it.repeats] === undefined) throw new Error('Choose how often it repeats');
   const kind = it.kind;
+  const full = kind === 'transfer' && !!it.fullBalance;
+  const amount = full ? (Number(it.amount) > 0 ? Number(it.amount) : 0) : Number(it.amount);
+  if (!full && !(amount > 0)) throw new Error('Amount must be more than 0');
+  if (REPEATS[it.repeats] === undefined) throw new Error('Choose how often it repeats');
   if (['expense', 'income', 'transfer'].indexOf(kind) < 0) throw new Error('Choose money out, money in or transfer');
   if (!it.account) throw new Error('Choose an account');
   if (kind === 'transfer' && (!it.toAccount || it.toAccount === it.account)) throw new Error('Choose a different To account');
@@ -898,9 +962,8 @@ function saveRecurring_(it) {
   const signed = kind === 'income' ? -amount : amount;
   sh.getRange(row, 1, 1, 9).setValues([[date_(it.first), desc, signed, it.currency || 'CHF',
     kind === 'transfer' ? '' : (it.category || ''), it.repeats, it.account, it.status || 'Planned', it.note || '']]);
-  sh.getRange(row, 14, 1, 4).setValues([[it.lastPaid ? date_(it.lastPaid) : '', it.endsOn ? date_(it.endsOn) : '',
-    WEEKEND.indexOf(it.weekend) >= 0 ? it.weekend : 'No change', kind === 'transfer' ? it.toAccount : '']]);
-  sh.getRange(row, 14, 1, 2).setNumberFormat('yyyy-mm-dd');
+  sh.getRange(row, 14, 1, 5).setValues([[it.lastPaid ? date_(it.lastPaid) : '', it.endsOn ? date_(it.endsOn) : '',
+    WEEKEND.indexOf(it.weekend) >= 0 ? it.weekend : 'No change', kind === 'transfer' ? it.toAccount : '', full ? 'Yes' : '']]);
   SpreadsheetApp.flush();
   return plan_();
 }
@@ -922,8 +985,13 @@ function markPaid_(pay) {
   const p = plannedRows_(ss).find(x => x.row === pay.row);
   if (!p || p.description !== pay.description) throw new Error('This item was changed in the sheet. Refresh and try again.');
   const kind = kindOfPlanned_(p);
-  const date = pay.date || ymd_(new Date());
-  const amount = Number(pay.amount || Math.abs(p.amount));
+  const date = pay.date || ymd_(dayOf_(new Date()));
+  let amount = Number(pay.amount || Math.abs(p.amount));
+  if (!(amount > 0) && p.fullBalance) {
+    const accs = accounts_(ss), to = accs.find(a => a.name === p.toAccount), from = accs.find(a => a.name === p.account);
+    amount = to && from ? round2_(Math.max(0, -to.balance) * to.rate / from.rate) : 0;
+  }
+  if (!(amount > 0)) throw new Error('Enter the amount you paid');
   const currency = pay.currency || p.currency;
   const account = pay.account || p.account;
   let entry;
@@ -955,7 +1023,7 @@ function setPaidThrough_(ss, p, due, onceStatus) {
   const sh = ss.getSheetByName('Planned');
   const d = date_(due);
   if (!p.lastPaid || d > p.lastPaid) {
-    sh.getRange(p.row, 14).setValue(d).setNumberFormat('yyyy-mm-dd');
+    sh.getRange(p.row, 14).setValue(d);   // the table's Date column formats it
   }
   if (p.repeats === 'Once') sh.getRange(p.row, 8).setValue(onceStatus);
 }
@@ -994,7 +1062,7 @@ function search_(q) {
 function categoryDetail_(name, month) {
   const ss = ss_();
   const s = settings_(ss);
-  const today = startOfDay_(new Date());
+  const today = dayOf_(new Date());
   const ym = parseMonth_(month) || { y: today.getFullYear(), m: today.getMonth() };
   const cat = s.categories.find(c => c.name === name);
   const log = logRows_(ss).filter(e => e.category === name);
@@ -1002,7 +1070,7 @@ function categoryDetail_(name, month) {
   for (let i = 11; i >= 0; i--) {
     const d = new Date(ym.y, ym.m - i, 1);
     const total = log.filter(e => e.date.getFullYear() === d.getFullYear() && e.date.getMonth() === d.getMonth()).reduce((t, e) => t + e.chf, 0);
-    months.push({ month: Utilities.formatDate(d, TZ, 'yyyy-MM'), total: round2_(total) });
+    months.push({ month: ymd_(d).slice(0, 7), total: round2_(total) });
   }
   const withData = months.filter(m => m.total > 0);
   const entries = log.filter(e => e.date.getFullYear() === ym.y && e.date.getMonth() === ym.m)
@@ -1048,7 +1116,7 @@ function reconcile_(name, bankBalance, apply) {
   const diff = round2_(bank - a.balance);
   const props = PropertiesService.getScriptProperties();
   const key = 'RECON_' + SHEET_ID + '_' + name;
-  const today = ymd_(new Date());
+  const today = ymd_(dayOf_(new Date()));
   if (apply) {
     if (Math.abs(diff) >= 0.005) {
       if (diff < 0) {
@@ -1081,8 +1149,8 @@ function ratesTable_(ss) {
   if (!sh || sh.getLastRow() < 3) return out;
   const v = sh.getRange(3, 1, sh.getLastRow() - 2, 5).getValues();
   v.forEach(r => {
-    if (r[0] instanceof Date && typeof r[1] === 'number') out.EGP.push([ymd_(r[0]), r[1]]);
-    if (r[3] instanceof Date && typeof r[4] === 'number') out.USD.push([ymd_(r[3]), r[4]]);
+    if (r[0] instanceof Date && typeof r[1] === 'number') out.EGP.push([ymd_(dayOf_(r[0])), r[1]]);
+    if (r[3] instanceof Date && typeof r[4] === 'number') out.USD.push([ymd_(dayOf_(r[3])), r[4]]);
   });
   return out;
 }
@@ -1156,9 +1224,9 @@ function envSheet_(ss) {
     sh = ss.insertSheet('Envelopes');
     sh.getRange(1, 1, 1, ENV_HEADERS.length).setValues([ENV_HEADERS]).setFontWeight('bold');
     sh.setFrozenRows(1);
-    sh.getRange('D:D').setNumberFormat('yyyy-mm-dd');
-    sh.getRange('C:C').setNumberFormat('#,##0.00');
-    sh.getRange('E:F').setNumberFormat('#,##0.00');
+    format_(sh.getRange('D:D'), 'yyyy-mm-dd');
+    format_(sh.getRange('C:C'), '#,##0.00');
+    format_(sh.getRange('E:F'), '#,##0.00');
   }
   return sh;
 }
@@ -1170,9 +1238,9 @@ function envelopeRows_(ss) {
     .map((r, i) => ({ r, row: i + 2 })).filter(x => x.r[0] !== '')
     .map(x => ({
       row: x.row, name: String(x.r[0]), type: ENV_TYPES.indexOf(String(x.r[1])) >= 0 ? String(x.r[1]) : 'Goal',
-      target: num_(x.r[2]), targetDate: x.r[3] instanceof Date ? x.r[3] : null,
+      target: num_(x.r[2]), targetDate: x.r[3] instanceof Date ? dayOf_(x.r[3]) : null,
       monthly: x.r[4] === '' ? null : num_(x.r[4]), saved: num_(x.r[5]), linked: String(x.r[6] || ''),
-      lastSetAside: x.r[7] instanceof Date ? Utilities.formatDate(x.r[7], TZ, 'yyyy-MM') : String(x.r[7] || '').replace(/^'/, ''),
+      lastSetAside: x.r[7] instanceof Date ? ymd_(dayOf_(x.r[7])).slice(0, 7) : String(x.r[7] || '').replace(/^'/, ''),
       note: String(x.r[8] || '')
     }));
 }
@@ -1182,7 +1250,7 @@ function monthsUntil_(from, to) {
 }
 
 function envelopes_(ss) {
-  const today = startOfDay_(new Date());
+  const today = dayOf_(new Date());
   const thisMonth = ymd_(today).slice(0, 7);
   const planned = plannedRows_(ss);
   const list = envelopeRows_(ss).map(e => {
@@ -1265,7 +1333,7 @@ function moveEnvelope_(row, match, amount, reason) {
   if (!isFinite(n) || n === 0) throw new Error('Enter an amount');
   const sh = ss.getSheetByName('Envelopes');
   sh.getRange(row, 6).setValue(round2_(Math.max(0, cur.saved + n)));
-  if (n > 0 && reason === 'monthly') sh.getRange(row, 8).setValue("'" + ymd_(new Date()).slice(0, 7));
+  if (n > 0 && reason === 'monthly') sh.getRange(row, 8).setValue("'" + ymd_(dayOf_(new Date())).slice(0, 7));
   SpreadsheetApp.flush();
   return envelopes_(ss);
 }
@@ -1279,9 +1347,176 @@ function useLinkedEnvelope_(ss, p, paidCHF) {
   sh.getRange(env.row, 6).setValue(round2_(Math.max(0, env.saved - paidCHF)));
   if (env.type === 'Sinking fund') {
     const fresh = plannedRows_(ss).find(x => x.row === p.row);
-    const next = fresh ? (openOccurrences_(fresh, startOfDay_(new Date()), addMonths_(new Date(), 25))[0] || {}).date : null;
-    if (next) sh.getRange(env.row, 4).setValue(next);
+    const next = fresh ? (openOccurrences_(fresh, dayOf_(new Date()), addMonths_(dayOf_(new Date()), 25))[0] || {}).date : null;
+    if (next) sh.getRange(env.row, 4).setValue(date_(ymd_(next)));
   }
 }
 
 function round6_(n) { return Math.round(n * 1e6) / 1e6; }
+
+// Number formats are set one column at a time: tabs formatted as a Sheets table
+// refuse a format change across several columns. A format problem never stops a save.
+function format_(range, pattern) {
+  for (let c = 0; c < range.getNumColumns(); c++) {
+    try { range.offset(0, c, range.getNumRows(), 1).setNumberFormat(pattern); } catch (err) { /* keep the existing format */ }
+  }
+}
+function dateFormat_(range) { format_(range, 'yyyy-mm-dd'); }
+
+
+// =====================================================================
+// iPhone Reminders ("To Pay" list) sync, used by the iPhone shortcut
+// =====================================================================
+// Each reminder carries an ID in its notes: FIN-<row>-<yyyymmdd>-<code>.
+// <code> comes from the description, so a reused row never matches an old reminder.
+function reminderCode_(text) {
+  let h = 0;
+  for (let i = 0; i < text.length; i++) h = (h * 31 + text.charCodeAt(i)) % 1679616; // 36^4
+  return ('0000' + h.toString(36)).slice(-4);
+}
+function reminderId_(p, due) { return 'FIN-' + p.row + '-' + ymd_(due).replace(/-/g, '') + '-' + reminderCode_(p.description); }
+
+function reminderSync_(existing, days) {
+  const ss = ss_();
+  const today = dayOf_(new Date());
+  const until = addDays_(today, Math.min(60, Math.max(1, Number(days) || 7)));
+  const ids = (Array.isArray(existing) ? existing : String(existing || '').split(/[\s,;]+/))
+    .map(x => String(x).trim()).filter(x => /^FIN-\d+-\d{8}-[0-9a-z]{4}$/.test(x));
+  const have = {}; ids.forEach(x => { have[x] = true; });
+  const planned = plannedRows_(ss);
+  const accBy = {}; accounts_(ss).forEach(a => { accBy[a.name] = a; });
+  const nf = n => n.toFixed(2).replace(/\.00$/, '').replace(/\B(?=(\d{3})+(?!\d))/g, ',');
+
+  // Payments and transfers due up to `until` (and unpaid overdue ones). Income is left out.
+  const open = {};
+  planned.forEach(p => {
+    const kind = kindOfPlanned_(p);
+    if (kind === 'income') return;
+    openOccurrences_(p, today, until).forEach(o => {
+      const id = reminderId_(p, o.due);
+      let amount = nf(Math.abs(p.amount)) + ' ' + p.currency;
+      if (p.fullBalance) {
+        const to = accBy[p.toAccount];
+        amount = to ? 'full balance, now ' + nf(Math.max(0, -to.balance)) + ' ' + to.currency : 'full balance';
+      }
+      const title = p.fullBalance ? p.description + ' · full balance (' + amount.replace('full balance, ', '') + ')'
+        : kind === 'transfer' ? 'Transfer ' + amount + ': ' + p.account + ' → ' + p.toAccount : p.description + ' · ' + amount;
+      const when = o.date < today ? today : o.date;
+      open[id] = {
+        id, title,
+        due: ymd_(when) + ' 09:00',
+        notes: (kind === 'transfer' ? p.description + '\n' : 'From ' + p.account + '\n') +
+               'Due ' + longDay_(o.date) + (o.date < today ? ' (overdue)' : '') +
+               '\nMark it paid in the Finances app.\n' + id
+      };
+    });
+  });
+
+  const create = [], update = [], complete = [], remove = [];
+  Object.keys(open).forEach(id => (have[id] ? update : create).push(open[id]));
+  ids.forEach(id => {
+    if (open[id]) return;
+    const m = id.match(/^FIN-(\d+)-(\d{4})(\d{2})(\d{2})-([0-9a-z]{4})$/);
+    const p = planned.find(x => x.row === Number(m[1]) && reminderCode_(x.description) === m[5]);
+    const due = new Date(Number(m[2]), Number(m[3]) - 1, Number(m[4]));
+    const paid = p && ((p.lastPaid && startOfDay_(p.lastPaid) >= due) || (p.repeats === 'Once' && (p.status === 'Paid' || p.status === 'Skipped')));
+    if (paid) complete.push(id);
+    else if (p && due > until) return;        // still planned, just further away: leave it
+    else remove.push(id);                     // deleted, changed or moved: the new date gets its own reminder
+  });
+  create.sort((a, b) => a.due < b.due ? -1 : 1);
+  return { create, update, complete, remove, checked: ymd_(today) + ' ' + Utilities.formatDate(new Date(), TZ, 'HH:mm') };
+}
+
+
+// =====================================================================
+// Monthly plan: income − planned payments − day-to-day − set aside − savings
+// Transfers between your own accounts are left out: they don't change the total.
+// =====================================================================
+function savingsTarget_(ss) {
+  const sh = ss.getSheetByName('Cash flow');
+  if (!sh) return 0;
+  const v = sh.getRange(2, 2).getValue();
+  return typeof v === 'number' && v > 0 ? v : 0;
+}
+
+function saveSavingsTarget_(amount) {
+  const n = Number(amount);
+  if (!(n >= 0)) throw new Error('Savings target must be 0 or more');
+  const ss = ss_();
+  const sh = ss.getSheetByName('Cash flow');
+  if (!sh) throw new Error('The Cash flow tab is missing');
+  sh.getRange(2, 2).setValue(n);
+  SpreadsheetApp.flush();
+  return plan_();
+}
+
+function monthlyPlan_(ss, c) {
+  const { today, end, monthKeys, planned, rate, variable, ddMonth, accounts } = c;
+  const rows = monthKeys.map((mk, i) => ({ month: mk, income: 0, planned: 0, dayToDay: 0, setAside: 0, fromFunds: 0, savings: 0 }));
+  const idx = {}; monthKeys.forEach((mk, i) => { idx[mk] = i; });
+  const billsByMonth = {};   // month -> description -> CHF (for linked sinking funds)
+
+  // Income and planned payments still open (overdue ones count this month)
+  planned.forEach(p => {
+    const kind = kindOfPlanned_(p);
+    if (kind === 'transfer') return;
+    openOccurrences_(p, today, end).forEach(o => {
+      const mk = ymd_(o.date < today ? today : o.date).slice(0, 7);
+      if (idx[mk] === undefined) return;
+      const chf = Math.abs(p.amount) * rate(p.currency);
+      if (kind === 'income') rows[idx[mk]].income += chf;
+      else {
+        rows[idx[mk]].planned += chf;
+        const b = billsByMonth[mk] || (billsByMonth[mk] = {});
+        b[p.description] = (b[p.description] || 0) + chf;
+      }
+    });
+  });
+
+  // Day-to-day: this month only for the days left after today
+  const dimNow = new Date(today.getFullYear(), today.getMonth() + 1, 0).getDate();
+  const restShare = (dimNow - today.getDate()) / dimNow;
+  rows.forEach((r, i) => {
+    const full = variable.perCategory.reduce((t, v) => t + ddMonth(r.month, v), 0);
+    r.dayToDay = i === 0 ? full * restShare : full;
+  });
+
+  // Funds and goals: monthly amount until the target; a linked bill is paid from its fund
+  const E = envelopes_(ss).envelopes;
+  E.forEach(e => {
+    let saved = e.saved, targetDate = e.targetDate ? date_(e.targetDate) : null;
+    rows.forEach((r, i) => {
+      const mStart = date_(r.month + '-01');
+      if (!(i === 0 && e.setAsideThisMonth) && saved < e.target - 0.005) {
+        let amount;
+        if (e.monthly !== null && e.monthly !== undefined) amount = e.monthly;
+        else if (targetDate) amount = (e.target - saved) / Math.max(1, monthsUntil_(mStart, targetDate) + 1);
+        else amount = 0;
+        amount = Math.min(amount, e.target - saved);
+        r.setAside += amount; saved += amount;
+      }
+      if (e.type === 'Sinking fund' && e.linked && billsByMonth[r.month] && billsByMonth[r.month][e.linked]) {
+        const use = Math.min(saved, billsByMonth[r.month][e.linked]);
+        r.fromFunds += use; saved -= use;
+        const p = planned.find(x => x.description === e.linked);
+        const nxt = p ? occurrences_(p, addDays_(new Date(mStart.getFullYear(), mStart.getMonth() + 1, 1), 0), addMonths_(mStart, 30))[0] : null;
+        targetDate = nxt || targetDate;
+      }
+    });
+  });
+
+  const target = savingsTarget_(ss);
+  const netWorth = accounts.reduce((t, a) => t + a.balanceCHF, 0);
+  const reserved = E.reduce((t, e) => t + Math.max(0, e.saved), 0);
+  const start = round2_(netWorth - reserved);
+  let free = start;
+  rows.forEach(r => {
+    r.savings = target;
+    ['income', 'planned', 'dayToDay', 'setAside', 'fromFunds', 'savings'].forEach(k => { r[k] = round2_(r[k]); });
+    r.left = round2_(r.income - r.planned - r.dayToDay - r.setAside + r.fromFunds - r.savings);
+    free = round2_(free + r.left);
+    r.free = free;
+  });
+  return { start, savingsTarget: target, method: variable.method, rows };
+}

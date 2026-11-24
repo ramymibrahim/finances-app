@@ -1,6 +1,6 @@
 // Keeps the app's own files on the phone so it opens without a connection.
 // Change VERSION whenever you upload new app files.
-const VERSION = 'finances-v6';
+const VERSION = 'finances-v7';
 const FILES = ['./', 'index.html', 'styles.css', 'app.js', 'manifest.webmanifest',
   'icons/icon-192.png', 'icons/apple-touch-icon.png', 'icons/pdf.svg'];
 
